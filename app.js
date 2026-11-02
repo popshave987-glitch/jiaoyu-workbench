@@ -292,11 +292,14 @@ function studentListHTML() {
   const list = filteredStudents();
   return list.map(s => studentCard(s, false)).join('') || `<div class="empty">没有匹配的学生</div>`;
 }
+function updateStuCount() {
+  const cnt = document.getElementById('stuCount');
+  if (cnt) cnt.textContent = `共 ${filteredStudents().length} 人`;
+}
 function refreshStudentList() {
   const box = document.getElementById('stuList');
   if (box) box.innerHTML = studentListHTML();
-  const cnt = document.getElementById('stuCount');
-  if (cnt) cnt.textContent = `共 ${filteredStudents().length} 人`;
+  updateStuCount();
 }
 function viewStudents() {
   const grades = [...new Set(S.students.map(s => s.grade).filter(Boolean))];
@@ -782,6 +785,7 @@ function bind() {
     if (e.target.id === 'stuQ') {
       stuComposing = false;
       stuQ = e.target.value;
+      updateStuCount();
       clearTimeout(stuTimer);
       stuTimer = setTimeout(refreshStudentList, 120);
     }
@@ -790,6 +794,7 @@ function bind() {
     if (e.target.matches && e.target.matches('input[data-combo]')) { showCombo(e.target); return; }
     if (e.target.id === 'stuQ') {
       stuQ = e.target.value;
+      updateStuCount();
       if (stuComposing) return;
       clearTimeout(stuTimer);
       stuTimer = setTimeout(refreshStudentList, 250);
