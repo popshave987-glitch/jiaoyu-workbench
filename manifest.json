@@ -1,0 +1,17 @@
+{
+  "name": "教育工作台 · 车老师",
+  "short_name": "教育工作台",
+  "description": "初中化学教学管理：学生档案、家长沟通、新生测评、上课反馈、学习规划、续费提醒",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F0FBFC",
+  "theme_color": "#028090",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
