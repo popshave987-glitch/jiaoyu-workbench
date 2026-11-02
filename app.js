@@ -110,6 +110,7 @@ function openModal(title, bodyHTML, okText, onOk) {
 function closeModal() {
   document.getElementById('modalWrap').classList.remove('show');
   modalOk = null;
+  if (typeof hideCombo === 'function') hideCombo();
 }
 function field(label, inner, tip) {
   return `<div class="field"><label>${label}</label>${inner}${tip ? `<div class="tip">${tip}</div>` : ''}</div>`;
@@ -122,6 +123,68 @@ function textarea(name, val, ph) {
 }
 function studentOptions(sel) {
   return S.students.map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)}${s.grade ? ' · ' + esc(s.grade) : ''}</option>`).join('');
+}
+
+/* ---------------- 可搜索下拉（可输入 + 可选 + 可筛选） ---------------- */
+function uniq(arr) {
+  return [...new Set(arr.filter(x => x != null && String(x).trim()))].map(x => String(x).trim());
+}
+const COMBO_SRC = {
+  name: () => uniq(S.students.map(s => s.name)),
+  grade: () => uniq(['初一', '初二', '初三', '高一', '高二', '高三'].concat(S.students.map(s => s.grade))),
+  school: () => uniq(S.students.map(s => s.school)),
+  subject: () => uniq(['化学', '数学', '物理', '英语', '语文', '生物'].concat(
+    S.students.flatMap(s => String(s.subjects || '').split(/[，,、\s]+/)))),
+};
+function combo(name, value, ph, options) {
+  return `<div class="combo-wrap">
+    <input name="${name}" value="${esc(value || '')}" placeholder="${esc(ph || '')}"
+      autocomplete="off" data-combo data-opts="${esc(JSON.stringify(options))}">
+    <span class="caret">▾</span>
+  </div>`;
+}
+
+let comboPop = null, comboInput = null, comboList = [], comboIdx = -1;
+
+function ensurePop() {
+  if (!comboPop) {
+    comboPop = document.createElement('div');
+    comboPop.className = 'combo-pop';
+    comboPop.hidden = true;
+    document.body.appendChild(comboPop);
+  }
+  return comboPop;
+}
+function showCombo(input) {
+  const opts = JSON.parse(input.dataset.opts || '[]');
+  const q = (input.value || '').trim().toLowerCase();
+  comboList = opts.filter(o => String(o).toLowerCase().includes(q));
+  comboInput = input;
+  comboIdx = comboList.findIndex(o => String(o) === input.value.trim());
+
+  const pop = ensurePop();
+  pop.innerHTML = comboList.length
+    ? comboList.map((o, i) => `<div class="combo-item ${i === comboIdx ? 'active' : ''}" data-i="${i}">${esc(o)}</div>`).join('')
+    : `<div class="combo-empty">没有匹配项，可直接输入</div>`;
+
+  const r = input.getBoundingClientRect();
+  pop.style.width = Math.max(r.width, 160) + 'px';
+  pop.style.left = Math.min(r.left, window.innerWidth - Math.max(r.width, 160) - 8) + 'px';
+  const h = Math.min(pop.scrollHeight || 200, 216);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight && r.top - 6 - h > 0) top = r.top - 6 - h;
+  pop.style.top = top + 'px';
+  pop.hidden = false;
+}
+function hideCombo() {
+  if (comboPop) comboPop.hidden = true;
+  comboInput = null; comboIdx = -1;
+}
+function pickCombo(i) {
+  if (!comboInput || i < 0 || i >= comboList.length) return;
+  comboInput.value = comboList[i];
+  hideCombo();
+  comboInput.focus();
 }
 function formData(root) {
   const o = {};
@@ -236,12 +299,12 @@ function viewStudents() {
 
 function formStudent(s) {
   s = s || {};
-  return field('学生姓名', input('name', s.name, '如 李明轩')) +
+  return field('学生姓名', combo('name', s.name, '如 李明轩', COMBO_SRC.name())) +
     `<div class="grid2">
-      ${field('年级', input('grade', s.grade, '如 初三'))}
-      ${field('学校', input('school', s.school, '如 实验中学'))}
+      ${field('年级', combo('grade', s.grade, '如 初三', COMBO_SRC.grade()))}
+      ${field('学校', combo('school', s.school, '如 实验中学', COMBO_SRC.school()))}
     </div>
-    ${field('科目', input('subjects', s.subjects, '化学'))}
+    ${field('科目', combo('subjects', s.subjects, '化学', COMBO_SRC.subject()), '填过科目会自动出现在下拉里')}
     <div class="grid2">
       ${field('状态', `<select name="status">
         ${['在读', '重点', '薄弱', '已结课'].map(x => `<option ${s.status === x ? 'selected' : ''}>${x}</option>`).join('')}
@@ -322,7 +385,7 @@ function formAssessment(a) {
   a = a || {};
   return field('学生', `<select name="sid">${studentOptions(a.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', input('subject', a.subject, '化学'))}
+      ${field('科目', combo('subject', a.subject, '化学', COMBO_SRC.subject()))}
       ${field('等级', `<select name="level">${['优秀', '一般', '薄弱'].map(x => `<option ${a.level === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
     </div>
     <div class="grid2">
@@ -424,7 +487,7 @@ function formFeedback(f) {
   f = f || {};
   return field('学生', `<select name="sid">${studentOptions(f.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', input('subject', f.subject, '化学'))}
+      ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
     field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
@@ -490,7 +553,7 @@ function formPlan(p) {
   const tasksText = (p.tasks || []).map(t => t.t).join('\n');
   return field('学生', `<select name="sid">${studentOptions(p.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', input('subject', p.subject, '化学'))}
+      ${field('科目', combo('subject', p.subject, '化学', COMBO_SRC.subject()))}
       ${field('结束日期', input('end', p.end, '', 'date'))}
     </div>` +
     field('阶段目标', input('goal', p.goal, '掌握几何证明…')) +
@@ -696,8 +759,33 @@ function bind() {
 
   // 输入筛选
   document.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('input[data-combo]')) { showCombo(e.target); return; }
     if (e.target.id === 'stuQ') { stuQ = e.target.value; render(); const i = document.getElementById('stuQ'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
   });
+
+  // 可搜索下拉：聚焦/键盘
+  document.addEventListener('focusin', (e) => {
+    if (e.target.matches && e.target.matches('input[data-combo]')) showCombo(e.target);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!comboInput || document.activeElement !== comboInput) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!comboList.length) return;
+      comboIdx = e.key === 'ArrowDown'
+        ? Math.min(comboIdx + 1, comboList.length - 1)
+        : Math.max(comboIdx - 1, 0);
+      [...comboPop.querySelectorAll('.combo-item')].forEach((el, i) => el.classList.toggle('active', i === comboIdx));
+      const act = comboPop.querySelector('.combo-item.active');
+      if (act) act.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      if (comboPop && !comboPop.hidden && comboIdx >= 0) { e.preventDefault(); pickCombo(comboIdx); }
+    } else if (e.key === 'Escape') {
+      hideCombo();
+    }
+  });
+  document.addEventListener('scroll', hideCombo, true);
+  window.addEventListener('resize', hideCombo);
   document.addEventListener('change', async (e) => {
     const id = e.target.id;
     if (id === 'stuFilter') { stuFilter = e.target.value; render(); }
@@ -736,6 +824,15 @@ function bind() {
 
   // 点击动作
   document.addEventListener('click', async (e) => {
+    // 下拉选择
+    const popHit = e.target.closest('.combo-pop');
+    if (popHit) {
+      const it = e.target.closest('.combo-item');
+      if (it) pickCombo(+it.dataset.i);
+      return;
+    }
+    if (!e.target.closest('.combo-wrap')) hideCombo();
+
     const t = e.target.closest('[data-act]');
     if (!t) return;
     const act = t.dataset.act;
