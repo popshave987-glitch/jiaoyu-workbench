@@ -611,13 +611,13 @@ function aiReady() { const c = aiCfg(); return !!(c.keys && c.keys.length && c.m
 
 async function aiGeneratePoints() {
   const cfg = aiCfg();
-  if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填豆包 Key 和模型');
+  if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填智谱 API Key 和模型');
   const topic = currentTopic();
   if (!topic) return toast('请先填写本节考点主题');
 
   const btn = document.querySelector('[data-act="ai-points"]');
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
-  const endpoint = cfg.endpoint || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+  const endpoint = cfg.endpoint || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
   const payload = {
     model: cfg.model,
     temperature: 0.2,
@@ -819,27 +819,27 @@ function viewData() {
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">豆包 AI（可选）</h3>
-      <div class="meta">填写后，「AI 生成考点」按钮才生效。Key 只存在这台设备，不上传。</div>
+      <h3 style="margin-top:0">智谱 GLM（可选 · 有免费模型）</h3>
+      <div class="meta">填写后，「AI 生成考点」按钮才生效。Key 只存在这台设备，不上传。免费模型推荐 glm-4.7-flash / glm-4.5-flash。</div>
       <div class="field" style="margin-top:10px">
         <label>API Key（可填多个，一行一个，用完自动换下一个）</label>
         <textarea id="aiKeys" placeholder="每行一个 Key" style="min-height:84px">${esc((aiCfg().keys || []).join('\n'))}</textarea>
       </div>
       <div class="field">
         <label>模型 / 接入点 ID</label>
-        <input id="aiModel" placeholder="豆包：doubao-seed-1-6-250615 或 ep-xxxx｜智谱：glm-4.7-flash" value="${esc(aiCfg().model || '')}" autocomplete="off">
+        <input id="aiModel" placeholder="如 glm-4.7-flash（免费） / glm-4.5-flash" value="${esc(aiCfg().model || '')}" autocomplete="off">
       </div>
       <div class="field">
-        <label>接口地址（留空 = 火山方舟）</label>
-        <input id="aiEndpoint" placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" value="${esc(aiCfg().endpoint || '')}" autocomplete="off">
-        <div class="tip" style="font-size:11.5px;color:#64748B">换服务商时改这里，如智谱：https://open.bigmodel.cn/api/paas/v4/chat/completions</div>
+        <label>接口地址（留空 = 智谱）</label>
+        <input id="aiEndpoint" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions" value="${esc(aiCfg().endpoint || '')}" autocomplete="off">
+        <div class="tip" style="font-size:11.5px;color:#64748B">换服务商时改这里，如豆包：https://ark.cn-beijing.volces.com/api/v3/chat/completions</div>
       </div>
       <div class="btns">
         <button class="btn primary" data-act="save-ai">保存</button>
         <button class="btn" data-act="clear-ai">清除</button>
       </div>
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
-        在火山方舟控制台「在线推理」里创建接入点后复制。新用户有免费额度，超出按量计费。
+        在智谱开放平台（bigmodel.cn）「API Keys」页创建后复制。Flash 系列模型免费（有并发限制）。
       </div>
     </div>
     <div class="card">
@@ -1340,7 +1340,7 @@ function bind() {
       return toast('已保存，写反馈时可以点「AI 生成考点」');
     }
     if (act === 'clear-ai') {
-      if (!confirm('清除已保存的豆包 Key？')) return;
+      if (!confirm('清除已保存的 API Key？')) return;
       try { localStorage.removeItem(AI_KEY); } catch (_) { }
       render();
       return toast('已清除');
