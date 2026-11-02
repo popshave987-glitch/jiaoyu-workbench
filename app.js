@@ -231,6 +231,7 @@ function pickCombo(i) {
   input.value = comboList[i];
   hideCombo();
   if (input.focus) input.focus();
+  if (input.name === 'topic') { initPoints({ topic: input.value }); renderPointChips(); }
 }
 function formData(root) {
   const o = {};
@@ -523,6 +524,8 @@ function viewFeedbacks() {
         <span class="tag">${esc(f.subject || '化学')}</span>
         <span class="tag ${f.rating === '待加强' ? 'amber' : f.rating === '优秀' ? '' : 'gray'}">${esc(f.rating || '良好')}</span>
         <span class="spacer"></span><span class="meta">${esc(f.date || '')}</span></div>
+      ${(f.topic || (f.points && f.points.length)) ? `<div class="meta" style="margin-top:6px">考点：<b>${esc(f.topic || '')}</b></div>
+      <div class="chips" style="margin-top:6px">${(f.points || []).map(p => `<span class="chip lv${p.lv}">${esc(p.t)} · ${POINT_LV[p.lv]}</span>`).join('')}</div>` : ''}
       <div style="margin-top:8px;font-size:13px;line-height:1.75">
         ${(f.notes || f.content) ? `<div><b style="color:#028090">课堂笔记：</b>${esc(f.notes || f.content)}</div>` : ''}
         ${f.performance ? `<div><b style="color:#028090">课堂表现：</b>${esc(f.performance)}</div>` : ''}
@@ -543,6 +546,51 @@ function viewFeedbacks() {
   }).join('') || `<div class="empty">还没有上课反馈</div>`}
   `;
 }
+
+/* ---------------- 内置化学考点库（离线可用，不花钱） ---------------- */
+const CHEM_TOPICS = {
+  '化学用语': ['元素符号与名称', '化学式书写', '化合价规则', '离子符号', '化学方程式配平'],
+  '空气与氧气': ['空气成分与用途', '氧气性质', '实验室制氧气', '燃烧与灭火', '缓慢氧化'],
+  '质量守恒与方程式': ['质量守恒定律', '方程式书写条件', '配平方法', '简单计算', '反应类型判断'],
+  '碳和碳的氧化物': ['CO₂ 制取与检验', 'CO₂ 性质', 'CO 还原性', '碳单质', '温室效应'],
+  '金属与金属材料': ['金属活动性顺序', '金属与酸反应', '金属与盐溶液', '合金', '金属资源保护'],
+  '溶液与溶解度曲线': ['溶解度概念', '曲线读图', '饱和与不饱和', '溶质质量分数', '结晶方法'],
+  '酸碱盐': ['酸碱指示剂', '常见酸的性质', '常见碱的性质', '盐与复分解', 'pH 与中和反应'],
+  '实验基本操作与气体制备': ['仪器与操作', '气密性检查', '装置选择', '收集与验满', '误差分析'],
+  '氧化还原反应': ['氧化剂与还原剂判断', '化合价升降与电子转移', '氧化还原方程式配平', '常见氧化剂还原剂', '氧化性与还原性强弱'],
+  '离子反应': ['电解质与非电解质', '离子方程式书写', '离子共存判断', '离子检验', '离子反应本质'],
+  '物质的量': ['物质的量与摩尔', '摩尔质量', '气体摩尔体积', '物质的量浓度', '配制一定浓度溶液'],
+  '钠及其化合物': ['钠的性质', '氧化钠与过氧化钠', '碳酸钠与碳酸氢钠', '焰色试验', '钠的保存与用途'],
+};
+const POINT_LV = ['不会', '半会', '会'];
+let pointBuf = [];
+
+function currentTopic() {
+  const el = document.querySelector('#modal [name=topic]');
+  return el ? el.value.trim() : '';
+}
+function initPoints(f) {
+  const topic = (f && f.topic || '').trim();
+  const list = CHEM_TOPICS[topic] || [];
+  pointBuf = list.map(t => {
+    const old = (f && f.points || []).find(x => x.t === t);
+    return { t, lv: old ? old.lv : 0 };
+  });
+}
+function renderPointChips() {
+  const box = document.getElementById('pointBox');
+  if (!box) return;
+  const topic = currentTopic();
+  const list = CHEM_TOPICS[topic] || [];
+  if (!list.length) {
+    box.innerHTML = `<div class="tip">${topic ? '这个主题没有内置考点，可直接在「需要加强点」里手写' : '先在上面填或选一个考点主题'}</div>`;
+    return;
+  }
+  box.innerHTML = list.map((t, i) => {
+    const lv = pointBuf[i] ? pointBuf[i].lv : 0;
+    return `<button type="button" class="chip lv${lv}" data-act="toggle-point" data-idx="${i}">${esc(t)} · ${POINT_LV[lv]}</button>`;
+  }).join('');
+}
 function formFeedback(f) {
   f = f || {};
   return field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
@@ -550,6 +598,8 @@ function formFeedback(f) {
       ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
+    field('本节考点', combo('topic', f.topic, '如 氧化还原反应 / 溶液与溶解度曲线', Object.keys(CHEM_TOPICS)), '填主题后自动列出考点，点一下切换：会 → 半会 → 不会') +
+    field('考点掌握', `<div id="pointBox" class="chips"></div>`) +
     field('课堂笔记', textarea('notes', f.notes || f.content, '本次讲了 CO₂ 的制取、装置气密性检查…')) +
     field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
     field('课后作业', textarea('homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式')) +
@@ -571,7 +621,7 @@ function feedbackText(f) {
 课后作业：${f.homework || f.task || '—'}
 进步点：${f.progress || f.good || '—'}
 需要加强点：${f.weak || '—'}
-默写检查情况：${f.dictation || '—'}${photos ? `\n（错题照片 ${photos} 张，随消息发送）` : ''}
+默写检查情况：${f.dictation || '—'}${f.topic ? `\n本节考点：${f.topic}` : ''}${(f.points || []).length ? `\n考点掌握：${f.points.map(p => `${p.t}（${['不会', '半会', '会'][p.lv]}）`).join('、')}` : ''}${photos ? `\n（错题照片 ${photos} 张，随消息发送）` : ''}
 —— 车老师`;
 }
 
@@ -896,10 +946,12 @@ const EXPORT_DEF = {
   feedbacks: {
     sheet: '上课反馈', widths: [12, 10, 9, 28, 28, 28, 24, 24, 24, 10],
     rows: (sid) => [
-      ['日期', '学生姓名', '科目', '课堂笔记', '课堂表现', '课后作业', '进步点', '需要加强点', '默写检查情况', '错题照片数'],
+      ['日期', '学生姓名', '科目', '本节考点', '考点掌握', '课堂笔记', '课堂表现', '课后作业', '进步点', '需要加强点', '默写检查情况', '错题照片数'],
       ...S.feedbacks.filter(f => !sid || f.sid === sid)
-        .map(f => [f.date, studentName(f.sid), f.subject, f.notes || f.content, f.performance,
-        f.homework || f.task, f.progress || f.good, f.weak, f.dictation, (f.photos || []).length]),
+        .map(f => [f.date, studentName(f.sid), f.subject, f.topic || '',
+        (f.points || []).map(p => `${p.t}（${['不会', '半会', '会'][p.lv]}）`).join('；'),
+        f.notes || f.content, f.performance, f.homework || f.task, f.progress || f.good,
+        f.weak, f.dictation, (f.photos || []).length]),
     ],
   },
   plans: {
@@ -921,7 +973,7 @@ function displayWidth(str) {
   }
   return w;
 }
-const LONG_COLS = ['课堂笔记', '课后作业', '阶段目标', '备注', '沟通内容', '任务清单', '优势', '薄弱', '跟进事项'];
+const LONG_COLS = ['课堂笔记', '课后作业', '阶段目标', '备注', '沟通内容', '任务清单', '优势', '薄弱', '跟进事项', '考点掌握'];
 function calcWidths(rows) {
   const headers = (rows[0] || []).map(String);
   return headers.map((h, i) => {
@@ -976,6 +1028,8 @@ function saveFeedback(o, id) {
   if (!o.sid) return toast('请先添加学生');
   delete o.photos;
   o.photos = photoBuf.slice();
+  o.topic = (o.topic || '').trim();
+  o.points = pointBuf.filter(p => p && p.t).map(p => ({ t: p.t, lv: p.lv }));
   if (id) Object.assign(S.feedbacks.find(x => x.id === id), o);
   else S.feedbacks.push({ id: uid(), ...o });
   saveKey('feedbacks'); closeModal(); render(); toast('已保存');
@@ -999,7 +1053,7 @@ const OPEN = {
   student: () => openModal('添加学生', formStudent(), '保存', (f) => saveStudent(formData(f))),
   contact: (sid) => openModal('记录家长沟通', formContact({ sid }), '保存', (f) => saveContact(formData(f))),
   assessment: (sid) => openModal('新建测评报告', formAssessment({ sid }), '保存', (f) => saveAssessment(formData(f))),
-  feedback: (sid) => { photoBuf = []; openModal('写上课反馈', formFeedback({ sid }), '保存', (f) => saveFeedback(formData(f))); renderPhotoPrev(); },
+  feedback: (sid) => { photoBuf = []; initPoints({ topic: '' }); openModal('写上课反馈', formFeedback({ sid }), '保存', (f) => saveFeedback(formData(f))); renderPhotoPrev(); renderPointChips(); },
   plan: (sid) => openModal('创建学习规划', formPlan({ sid }), '保存', (f) => savePlan(formData(f))),
 };
 
@@ -1034,7 +1088,11 @@ function bind() {
     }
   });
   document.addEventListener('input', (e) => {
-    if (e.target.matches && e.target.matches('input[data-combo]')) { showCombo(e.target); return; }
+    if (e.target.matches && e.target.matches('input[data-combo]')) {
+      showCombo(e.target);
+      if (e.target.name === 'topic') { initPoints({ topic: e.target.value }); renderPointChips(); }
+      return;
+    }
     if (e.target.id === 'stuQ') {
       stuQ = e.target.value;
       updateStuCount();
@@ -1162,14 +1220,20 @@ function bind() {
     if (act === 'edit-feedback') {
       const f0 = S.feedbacks.find(x => x.id === id);
       photoBuf = (f0.photos || []).slice();
+      initPoints(f0);
       openModal('编辑反馈', formFeedback(f0), '保存', f => saveFeedback(formData(f), id));
-      renderPhotoPrev();
+      renderPhotoPrev(); renderPointChips();
       return;
     }
     if (act === 'del-feedback') { if (!confirm('删除这条反馈？')) return; S.feedbacks = S.feedbacks.filter(x => x.id !== id); await saveKey('feedbacks'); render(); return; }
     if (act === 'copy-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) copyText(feedbackText(f), '反馈已复制，去微信粘贴'); return; }
     if (act === 'share-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) { shareFeedback(f); } return; }
     if (act === 'dl-photos') { const f = S.feedbacks.find(x => x.id === id); if (f) downloadPhotos(f); return; }
+    if (act === 'toggle-point') {
+      const i = +t.dataset.idx;
+      if (pointBuf[i]) { pointBuf[i].lv = (pointBuf[i].lv + 1) % 3; renderPointChips(); }
+      return;
+    }
     if (act === 'del-photo') { photoBuf.splice(+t.dataset.idx, 1); renderPhotoPrev(); return; }
     if (act === 'view-photo') {
       const f = S.feedbacks.find(x => x.id === id);

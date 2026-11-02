@@ -251,3 +251,14 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
   main { margin: 0; padding: 0; }
   .card { box-shadow: none; break-inside: avoid; }
 }
+
+/* ---------- 考点标签 ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.chip {
+  border: 1px solid var(--line); background: #fff; border-radius: 999px;
+  padding: 6px 11px; font-size: 12.5px; line-height: 1.2; cursor: pointer;
+  color: var(--text); font-family: inherit;
+}
+.chip.lv0 { border-color: #F3C1C4; background: #FFF3F3; color: #A3312B; }
+.chip.lv1 { border-color: #F7DCA8; background: #FEF7E8; color: #8B5E00; }
+.chip.lv2 { border-color: #BDE6D8; background: #EAF9F3; color: #0B6B5B; }
