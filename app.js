@@ -390,7 +390,7 @@ function viewContacts() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === conSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 条</h2><span class="hint">按日期倒序</span></div>
+    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-contact">＋ 记沟通</button></div>
     ${list.map(c => `<div class="card">
       <div class="row"><span class="tag">${esc(c.type || '微信')}</span><strong>${esc(studentName(c.sid))}</strong>
         <span class="spacer"></span><span class="meta">${esc(c.date || '')}</span></div>
@@ -426,6 +426,7 @@ function viewAssessments() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === assSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
+    <div class="section-title"><h2>共 ${list.length} 份</h2><button class="btn sm primary" data-act="add-assessment">＋ 新建测评</button></div>
     ${list.map(a => `<div class="card">
       <div class="row"><strong>${esc(studentName(a.sid))}</strong>
         <span class="tag ${a.level === '薄弱' ? 'warn' : a.level === '优秀' ? '' : 'amber'}">${esc(a.subject || '')} ${esc(a.level || '')}</span>
@@ -521,6 +522,7 @@ function viewFeedbacks() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === fbSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
+    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-feedback">＋ 写反馈</button></div>
     ${list.map(f => {
     const photos = f.photos || [];
     return `<div class="card">
@@ -529,12 +531,12 @@ function viewFeedbacks() {
         <span class="tag ${f.rating === '待加强' ? 'amber' : f.rating === '优秀' ? '' : 'gray'}">${esc(f.rating || '良好')}</span>
         <span class="spacer"></span><span class="meta">${esc(f.date || '')}</span></div>
       <div style="margin-top:8px;font-size:13px;line-height:1.75">
-        ${f.performance ? `<div><b style="color:#028090">课堂表现：</b>${esc(f.performance)}</div>` : ''}
         ${(f.notes || f.content) ? `<div><b style="color:#028090">课堂笔记：</b>${esc(f.notes || f.content)}</div>` : ''}
+        ${f.performance ? `<div><b style="color:#028090">课堂表现：</b>${esc(f.performance)}</div>` : ''}
         ${(f.homework || f.task) ? `<div><b style="color:#028090">课后作业：</b>${esc(f.homework || f.task)}</div>` : ''}
         ${(f.progress || f.good) ? `<div><b style="color:#0B6B5B">进步点：</b>${esc(f.progress || f.good)}</div>` : ''}
-        ${f.weak ? `<div><b style="color:#A3312B">需要加强：</b>${esc(f.weak)}</div>` : ''}
-        ${f.dictation ? `<div><b style="color:#8B5E00">默写检查：</b>${esc(f.dictation)}</div>` : ''}
+        ${f.weak ? `<div><b style="color:#A3312B">需要加强点：</b>${esc(f.weak)}</div>` : ''}
+        ${f.dictation ? `<div><b style="color:#8B5E00">默写检查情况：</b>${esc(f.dictation)}</div>` : ''}
       </div>
       ${photos.length ? `<div class="photos">${photos.map((p, i) => `<div class="photo"><img src="${p}" alt="错题 ${i + 1}"><button data-act="view-photo" data-id="${f.id}" data-idx="${i}">⤢</button></div>`).join('')}</div>` : ''}
       <div class="btns">
@@ -548,17 +550,17 @@ function viewFeedbacks() {
 }
 function formFeedback(f) {
   f = f || {};
-  return field('学生', `<select name="sid">${studentOptions(f.sid)}</select>`) +
+  return field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
     `<div class="grid2">
       ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
-    field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
     field('课堂笔记', textarea('notes', f.notes || f.content, '本次讲了 CO₂ 的制取、装置气密性检查…')) +
+    field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
     field('课后作业', textarea('homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式')) +
     field('进步点', input('progress', f.progress || f.good, '方程式配平正确率明显提高')) +
-    field('需要加强', input('weak', f.weak, '装置气密性检查的表述仍不完整')) +
-    field('默写检查', input('dictation', f.dictation, '化学式默写 8/10，错 H₂CO₃、Fe(OH)₃')) +
+    field('需要加强点', input('weak', f.weak, '装置气密性检查的表述仍不完整')) +
+    field('默写检查情况', input('dictation', f.dictation, '化学式默写 8/10，错 H₂CO₃、Fe(OH)₃')) +
     field('错题拍照', `<input type="file" name="photos" accept="image/*" multiple>
       <div class="tip">可拍多张，自动压缩后存在本机；没有就留空。</div>
       <div class="photos" id="photoPrev"></div>`) +
@@ -569,12 +571,12 @@ function feedbackText(f) {
   const photos = (f.photos || []).length;
   return `【${st ? st.name : '学生'} · ${f.subject || '化学'} 课堂反馈】
 日期：${f.date || '—'}
-课堂表现：${f.performance || '—'}
 课堂笔记：${f.notes || f.content || '—'}
+课堂表现：${f.performance || '—'}
 课后作业：${f.homework || f.task || '—'}
 进步点：${f.progress || f.good || '—'}
-需要加强：${f.weak || '—'}
-默写检查：${f.dictation || '—'}${photos ? `\n（错题照片 ${photos} 张，随消息发送）` : ''}
+需要加强点：${f.weak || '—'}
+默写检查情况：${f.dictation || '—'}${photos ? `\n（错题照片 ${photos} 张，随消息发送）` : ''}
 —— 车老师`;
 }
 
@@ -589,6 +591,7 @@ function viewPlans() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === plSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
+    <div class="section-title"><h2>共 ${list.length} 个规划</h2><button class="btn sm primary" data-act="add-plan">＋ 创建规划</button></div>
     ${list.map(p => {
     const tasks = p.tasks || [];
     const done = tasks.filter(t => t.done).length;
@@ -629,6 +632,7 @@ function viewRenewals() {
   const overdue = list.filter(r => { const d = daysTo(r.nextDue); return d !== null && d < 0; });
   return `
     ${overdue.length ? `<div class="notice" style="margin-bottom:12px">⚠️ ${overdue.length} 名学生已逾期续费：${overdue.map(r => esc(studentName(r.sid))).join('、')}</div>` : ''}
+    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-renewal">＋ 添加续费</button></div>
     ${list.map(r => {
     const d = daysTo(r.nextDue);
     const badge = d === null ? '<span class="tag gray">未设到期</span>'
@@ -670,6 +674,7 @@ function addCycle(dateStr, cycle) {
 }
 
 /* ---------------- 数据与备份 ---------------- */
+let expSid = '';
 function viewData() {
   const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划', renewals: '续费' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
   return `
@@ -690,17 +695,26 @@ function viewData() {
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">导出</h3>
+      <h3 style="margin-top:0">导出 Excel</h3>
+      <div class="field" style="margin-bottom:10px">
+        <label>导出范围</label>
+        <select id="expSid">
+          <option value="">全部学生</option>
+          ${S.students.map(s => `<option value="${s.id}" ${s.id === expSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
       <div class="data-row">
-        <button class="btn" data-act="csv-students">学生 CSV</button>
-        <button class="btn" data-act="csv-contacts">沟通 CSV</button>
-        <button class="btn" data-act="csv-assess">测评 CSV</button>
-        <button class="btn" data-act="csv-feedback">反馈 CSV</button>
-        <button class="btn" data-act="csv-plans">规划 CSV</button>
-        <button class="btn" data-act="csv-renewals">续费 CSV</button>
+        <button class="btn" data-act="xlsx-students">学生</button>
+        <button class="btn" data-act="xlsx-contacts">家长沟通</button>
+        <button class="btn" data-act="xlsx-assessments">新生测评</button>
+        <button class="btn" data-act="xlsx-feedbacks">上课反馈</button>
+        <button class="btn" data-act="xlsx-plans">学习规划</button>
+        <button class="btn" data-act="xlsx-renewals">续费管理</button>
       </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
-      <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">CSV 用 Excel/WPS 直接打开；JSON 用于换手机、换电脑时整库恢复。</div>
+      <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
+        导出为 .xlsx：表头加粗、冻结首行、可筛选，WPS / Excel 直接打开。JSON 用于换手机、换电脑时整库恢复。
+      </div>
     </div>
     <div class="card">
       <h3 style="margin-top:0">导入 / 恢复</h3>
@@ -720,39 +734,226 @@ function viewData() {
   `;
 }
 
-/* ---------------- CSV ---------------- */
-function toCSV(rows) {
-  return '\ufeff' + rows.map(r => r.map(c => {
-    const s = String(c == null ? '' : c);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }).join(',')).join('\r\n');
+/* ---------------- 导出（.xlsx，表头加粗） ---------------- */
+const XLSX_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+function xmlEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
 }
-function download(name, text, type) {
-  const blob = new Blob([text], { type: type || 'text/plain;charset=utf-8' });
+function colName(i) {
+  let n = i + 1, s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ bytes[i]) & 0xFF];
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data;
+    const crc = crc32(data);
+
+    const local = new Uint8Array(30 + name.length);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0, true);
+    dv.setUint16(8, 0, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, 0, true);
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, data.length, true);
+    dv.setUint32(22, data.length, true);
+    dv.setUint16(26, name.length, true);
+    dv.setUint16(28, 0, true);
+    local.set(name, 30);
+    chunks.push(local, data);
+
+    const cen = new Uint8Array(46 + name.length);
+    const cv = new DataView(cen.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    cen.set(name, 46);
+    central.push(cen);
+    offset += local.length + data.length;
+  }
+  const cdSize = central.reduce((n, c) => n + c.length, 0);
+  const total = offset + cdSize + 22;
+  const out = new Uint8Array(total);
+  let p = 0;
+  chunks.forEach(c => { out.set(c, p); p += c.length; });
+  central.forEach(c => { out.set(c, p); p += c.length; });
+
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, central.length, true);
+  ev.setUint16(10, central.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+  out.set(eocd, p);
+  return out;
+}
+function sheetXml(rows, widths) {
+  const cols = widths && widths.length
+    ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
+    : '';
+  const body = rows.map((row, ri) => {
+    const cells = row.map((v, ci) => {
+      const ref = colName(ci) + (ri + 1);
+      const st = ri === 0 ? ' s="1"' : '';
+      if (v == null || v === '') return `<c r="${ref}"${st}/>`;
+      if (typeof v === 'number') return `<c r="${ref}"${st}><v>${v}</v></c>`;
+      return `<c r="${ref}"${st} t="inlineStr"><is><t>${xmlEsc(v)}</t></is></c>`;
+    }).join('');
+    return `<row r="${ri + 1}"${ri === 0 ? ' ht="24" customHeight="1"' : ''}>${cells}</row>`;
+  }).join('');
+  const lastCol = colName(((rows[0] || []).length) - 1);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="${XLSX_NS}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols}<sheetData>${body}</sheetData><autoFilter ref="A1:${lastCol}${rows.length}"/></worksheet>`;
+}
+function xlsxBlob(rows, widths, sheetName) {
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="${XLSX_NS}">
+<fonts count="2"><font><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><sz val="11"/><name val="Microsoft YaHei"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F4F7"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD3E3E7"/></left><right style="thin"><color rgb="FFD3E3E7"/></right><top style="thin"><color rgb="FFD3E3E7"/></top><bottom style="thin"><color rgb="FFD3E3E7"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const files = [
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+    },
+    {
+      name: 'xl/workbook.xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="${XLSX_NS}" xmlns:r="${REL_NS}"><sheets><sheet name="${xmlEsc(sheetName || '导出')}" sheetId="1" r:id="rId1"/></sheets></workbook>`
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${REL_NS}/styles" Target="styles.xml"/></Relationships>`
+    },
+    { name: 'xl/styles.xml', data: styles },
+    { name: 'xl/worksheets/sheet1.xml', data: sheetXml(rows, widths) },
+  ];
+
+  return new Blob([zipStore(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function downloadBlob(name, blob) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const CSV = {
-  students: () => [['姓名', '年级', '学校', '科目', '状态', '家长', '电话', '备注', '建档日期']].concat(
-    S.students.map(s => [s.name, s.grade, s.school, s.subjects, s.status, s.parent, s.phone, s.note, s.created])),
-  contacts: () => [['日期', '学生', '方式', '内容', '跟进']].concat(
-    S.contacts.map(c => [c.date, studentName(c.sid), c.type, c.content, c.follow])),
-  assessments: () => [['日期', '学生', '科目', '得分', '满分', '等级', '优势', '薄弱', '目标']].concat(
-    S.assessments.map(a => [a.date, studentName(a.sid), a.subject, a.score, a.total, a.level, a.strong, a.weak, a.goal])),
-  feedbacks: () => [['日期', '学生', '科目', '评价', '课堂表现', '课堂笔记', '课后作业', '进步点', '需要加强', '默写检查', '错题照片数']].concat(
-    S.feedbacks.map(f => [f.date, studentName(f.sid), f.subject, f.rating, f.performance,
-    f.notes || f.content, f.homework || f.task, f.progress || f.good, f.weak, f.dictation, (f.photos || []).length])),
-  plans: () => [['学生', '科目', '目标', '开始', '结束', '任务', '完成数', '总数']].concat(
-    S.plans.map(p => [studentName(p.sid), p.subject, p.goal, p.start, p.end,
-    (p.tasks || []).map(t => (t.done ? '✓' : '·') + t.t).join(' | '),
-    (p.tasks || []).filter(t => t.done).length, (p.tasks || []).length])),
-  renewals: () => [['学生', '服务', '周期', '金额', '上次缴费', '下次到期']].concat(
-    S.renewals.map(r => [studentName(r.sid), r.service, r.cycle, r.amount, r.lastPay, r.nextDue])),
-};
 
+/* ---------------- 导出数据源（可按学生筛选） ---------------- */
+const EXPORT_DEF = {
+  students: {
+    sheet: '学生', widths: [12, 8, 16, 10, 8, 12, 16, 28, 12],
+    rows: (sid) => [
+      ['姓名', '年级', '学校', '科目', '状态', '家长', '电话', '备注', '建档日期'],
+      ...S.students.filter(s => !sid || s.id === sid)
+        .map(s => [s.name, s.grade, s.school, s.subjects, s.status, s.parent, s.phone, s.note, s.created]),
+    ],
+  },
+  contacts: {
+    sheet: '家长沟通', widths: [12, 10, 8, 46, 28],
+    rows: (sid) => [
+      ['日期', '学生姓名', '沟通方式', '沟通内容', '跟进事项'],
+      ...S.contacts.filter(c => !sid || c.sid === sid)
+        .map(c => [c.date, studentName(c.sid), c.type, c.content, c.follow]),
+    ],
+  },
+  assessments: {
+    sheet: '新生测评', widths: [12, 10, 8, 8, 8, 8, 30, 30, 30],
+    rows: (sid) => [
+      ['日期', '学生姓名', '科目', '得分', '满分', '等级', '优势', '薄弱', '阶段目标'],
+      ...S.assessments.filter(a => !sid || a.sid === sid)
+        .map(a => [a.date, studentName(a.sid), a.subject, a.score, a.total, a.level, a.strong, a.weak, a.goal]),
+    ],
+  },
+  feedbacks: {
+    sheet: '上课反馈', widths: [12, 10, 9, 28, 28, 28, 24, 24, 24, 10],
+    rows: (sid) => [
+      ['日期', '学生姓名', '科目', '课堂笔记', '课堂表现', '课后作业', '进步点', '需要加强点', '默写检查情况', '错题照片数'],
+      ...S.feedbacks.filter(f => !sid || f.sid === sid)
+        .map(f => [f.date, studentName(f.sid), f.subject, f.notes || f.content, f.performance,
+        f.homework || f.task, f.progress || f.good, f.weak, f.dictation, (f.photos || []).length]),
+    ],
+  },
+  plans: {
+    sheet: '学习规划', widths: [10, 8, 30, 12, 12, 46, 8, 8],
+    rows: (sid) => [
+      ['学生姓名', '科目', '阶段目标', '开始日期', '结束日期', '任务清单', '已完成', '总任务'],
+      ...S.plans.filter(p => !sid || p.sid === sid)
+        .map(p => [studentName(p.sid), p.subject, p.goal, p.start, p.end,
+        (p.tasks || []).map(t => (t.done ? '✓ ' : '· ') + t.t).join('；'),
+        (p.tasks || []).filter(t => t.done).length, (p.tasks || []).length]),
+    ],
+  },
+  renewals: {
+    sheet: '续费管理', widths: [10, 10, 8, 10, 12, 12],
+    rows: (sid) => [
+      ['学生姓名', '服务', '周期', '金额', '上次缴费', '下次到期'],
+      ...S.renewals.filter(r => !sid || r.sid === sid)
+        .map(r => [studentName(r.sid), r.service, r.cycle, Number(r.amount) || '', r.lastPay, r.nextDue]),
+    ],
+  },
+};
+function exportExcel(key, sid) {
+  const d = EXPORT_DEF[key];
+  if (!d) return;
+  const rows = d.rows(sid);
+  if (rows.length <= 1) return toast('所选范围内没有数据');
+  const who = sid ? studentName(sid) : '全部';
+  downloadBlob(`${d.sheet}_${who}_${today()}.xlsx`, xlsxBlob(rows, d.widths, d.sheet));
+  toast('已导出 Excel');
+}
 /* ---------------- 表单提交 ---------------- */
 function saveStudent(o, id) {
   if (!o.name) return toast('请填学生姓名');
@@ -885,6 +1086,7 @@ function bind() {
     if (id === 'assSid') { assSid = e.target.value; render(); }
     if (id === 'fbSid') { fbSid = e.target.value; render(); }
     if (id === 'plSid') { plSid = e.target.value; render(); }
+    if (id === 'expSid') { expSid = e.target.value; }
     if (e.target.matches('[data-act="toggle-task"]')) {
       const p = S.plans.find(x => x.id === e.target.dataset.pid);
       if (p) { p.tasks[+e.target.dataset.idx].done = e.target.checked; await saveKey('plans'); render(); }
@@ -951,11 +1153,11 @@ function bind() {
       ['contacts', 'assessments', 'feedbacks', 'plans', 'renewals'].forEach(k => { S[k] = S[k].filter(x => x.sid !== id); saveKey(k); });
       await saveKey('students'); render(); return toast('已删除');
     }
-    if (act === 'add-contact') return OPEN.contact(sid);
-    if (act === 'add-assessment') return OPEN.assessment(sid);
-    if (act === 'add-feedback') return OPEN.feedback(sid);
-    if (act === 'add-plan') return OPEN.plan(sid);
-    if (act === 'add-renewal') return OPEN.renewal(sid);
+    if (act === 'add-contact') { if (!S.students.length) return toast('请先添加学生'); return OPEN.contact(sid); }
+    if (act === 'add-assessment') { if (!S.students.length) return toast('请先添加学生'); return OPEN.assessment(sid); }
+    if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }
+    if (act === 'add-plan') { if (!S.students.length) return toast('请先添加学生'); return OPEN.plan(sid); }
+    if (act === 'add-renewal') { if (!S.students.length) return toast('请先添加学生'); return OPEN.renewal(sid); }
 
     if (act === 'edit-contact') return openModal('编辑沟通', formContact(S.contacts.find(x => x.id === id)), '保存', f => saveContact(formData(f), id));
     if (act === 'del-contact') { if (!confirm('删除这条沟通记录？')) return; S.contacts = S.contacts.filter(x => x.id !== id); await saveKey('contacts'); render(); return; }
@@ -1001,12 +1203,9 @@ function bind() {
     }
 
     // 数据页
-    if (act.startsWith('csv-')) {
-      const k = act.slice(4);
-      const map = { students: 'students', contacts: 'contacts', assess: 'assessments', feedback: 'feedbacks', plans: 'plans', renewals: 'renewals' };
-      const key = map[k] || k;
-      download(`${key}_${today()}.csv`, toCSV(CSV[key]()), 'text/csv;charset=utf-8');
-      return toast('已导出 CSV');
+    if (act.startsWith('xlsx-')) {
+      exportExcel(act.slice(5), expSid);
+      return;
     }
     if (act === 'json-export') {
       download(`教学助手备份_${today()}.json`, JSON.stringify(S, null, 2), 'application/json');
