@@ -598,11 +598,19 @@ function renderPointChips() {
 /* ---------------- 豆包 AI（可选，自带 Key） ---------------- */
 const AI_KEY = 'doubao_ai_cfg_v1';
 function aiCfg() {
-  try {
-    const c = JSON.parse(localStorage.getItem(AI_KEY) || '{}') || {};
-    if (!Array.isArray(c.keys)) c.keys = c.key ? [c.key] : [];
-    return c;
-  } catch (_) { return { keys: [] }; }
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem(AI_KEY) || '{}') || {}; } catch (_) { c = {}; }
+  if (!Array.isArray(c.keys)) c.keys = c.key ? [c.key] : [];
+  // 本机没填时，用内置配置
+  const built = window.APP_AI;
+  if (!c.keys.length && built && Array.isArray(built.keys) && built.keys.length) {
+    c.keys = built.keys.slice();
+    c.model = c.model || built.model || '';
+    c.endpoint = c.endpoint || built.endpoint || '';
+    c.builtin = true;
+  }
+  if (!c.model && built && built.model) c.model = built.model;
+  return c;
 }
 function saveAiCfg(cfg) {
   try { localStorage.setItem(AI_KEY, JSON.stringify(cfg)); } catch (_) { }
