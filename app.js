@@ -5,8 +5,8 @@
 
 const DB_NAME = 'chems_teach_v1';
 const STORE = 'kv';
-const KEYS = ['students', 'contacts', 'assessments', 'feedbacks', 'plans', 'renewals'];
-const S = { students: [], contacts: [], assessments: [], feedbacks: [], plans: [], renewals: [] };
+const KEYS = ['students', 'contacts', 'assessments', 'feedbacks', 'plans'];
+const S = { students: [], contacts: [], assessments: [], feedbacks: [], plans: [] };
 
 /* ---------------- 存储 ---------------- */
 function openDB() {
@@ -129,7 +129,6 @@ const NAV = [
   { id: 'assessments', t: '新生测评', i: '📊' },
   { id: 'feedbacks', t: '上课反馈', i: '📝' },
   { id: 'plans', t: '学习规划', i: '🎯' },
-  { id: 'renewals', t: '续费管理', i: '💰' },
   { id: 'data', t: '数据与备份', i: '🗂️' },
 ];
 let current = 'home';
@@ -246,7 +245,7 @@ function render() {
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
     assessments: viewAssessments, feedbacks: viewFeedbacks,
-    plans: viewPlans, renewals: viewRenewals, data: viewData,
+    plans: viewPlans, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
   document.getElementById('fab').style.display = current === 'data' || current === 'home' ? 'none' : 'flex';
@@ -256,17 +255,7 @@ function render() {
 function viewHome() {
   const active = S.students.filter(s => s.status !== '已结课').length;
   const weekContacts = S.contacts.filter(c => daysTo(c.date) <= 0 && daysTo(c.date) >= -6).length;
-  const due = S.renewals.filter(r => { const d = daysTo(r.nextDue); return d !== null && d <= 7; });
   const ongoing = S.plans.filter(p => (p.tasks || []).some(t => !t.done)).length;
-
-  const dueList = due.slice(0, 4).map(r => {
-    const d = daysTo(r.nextDue);
-    return `<div class="card tap" data-act="go-renewals">
-      <div class="row"><strong>${esc(studentName(r.sid))}</strong>
-      <span class="tag ${d < 0 ? 'warn' : 'amber'}">${d < 0 ? '逾期 ' + (-d) + ' 天' : d === 0 ? '今天到期' : d + ' 天后到期'}</span>
-      <span class="spacer"></span><span class="meta">${esc(r.service || '')}</span></div>
-    </div>`;
-  }).join('') || `<div class="empty">暂无临近续费</div>`;
 
   const recent = S.students.slice(0, 3).map(s => studentCard(s, true)).join('') || `<div class="empty">还没有学生，点右下角「+」添加第一个</div>`;
 
@@ -274,7 +263,7 @@ function viewHome() {
     <div class="stats">
       <div class="stat"><div class="num">${active}</div><div class="lbl">在读学生</div></div>
       <div class="stat"><div class="num">${weekContacts}</div><div class="lbl">近 7 天沟通</div></div>
-      <div class="stat ${due.length ? 'warn' : ''}"><div class="num">${due.length}</div><div class="lbl">待续费提醒</div></div>
+      <div class="stat"><div class="num">${S.assessments.length}</div><div class="lbl">新生测评</div></div>
       <div class="stat"><div class="num">${ongoing}</div><div class="lbl">进行中规划</div></div>
     </div>
     <div class="quick">
@@ -283,8 +272,6 @@ function viewHome() {
       <button data-act="quick" data-q="assessment">＋ 新测评</button>
       <button data-act="quick" data-q="feedback">＋ 写反馈</button>
     </div>
-    <div class="section-title"><h2>待续费</h2><span class="hint">7 天内</span></div>
-    ${dueList}
     <div class="section-title"><h2>最近添加的学生</h2><a href="#/students" style="font-size:12px;color:#028090;text-decoration:none">全部 →</a></div>
     ${recent}
   `;
@@ -355,11 +342,17 @@ function viewStudents() {
         ${grades.map(g => `<option ${g === stuFilter ? 'selected' : ''}>${esc(g)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2 id="stuCount">共 ${filteredStudents().length} 人</h2><span class="hint">在读 ${S.students.filter(s => s.status !== '已结课').length} 人</span></div>
+    <div class="section-title"><h2 id="stuCount">共 ${filteredStudents().length} 人</h2>${pageActions('students','add-student','＋ 添加学生')}</div>
     <div id="stuList">${studentListHTML()}</div>
   `;
 }
 
+function pageActions(mod, addAct, addLabel) {
+  return `<div class="row" style="gap:8px">
+    <button class="btn sm" data-act="export-page" data-mod="${mod}">导出</button>
+    ${addAct ? `<button class="btn sm primary" data-act="${addAct}">${addLabel}</button>` : ''}
+  </div>`;
+}
 function formStudent(s) {
   s = s || {};
   return field('学生姓名', combo('name', s.name, '如 李明轩', COMBO_SRC.name())) +
@@ -390,7 +383,7 @@ function viewContacts() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === conSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-contact">＋ 记沟通</button></div>
+    <div class="section-title"><h2>共 ${list.length} 条</h2>${pageActions('contacts','add-contact','＋ 记沟通')}</div>
     ${list.map(c => `<div class="card">
       <div class="row"><span class="tag">${esc(c.type || '微信')}</span><strong>${esc(studentName(c.sid))}</strong>
         <span class="spacer"></span><span class="meta">${esc(c.date || '')}</span></div>
@@ -426,7 +419,7 @@ function viewAssessments() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === assSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 份</h2><button class="btn sm primary" data-act="add-assessment">＋ 新建测评</button></div>
+    <div class="section-title"><h2>共 ${list.length} 份</h2>${pageActions('assessments','add-assessment','＋ 新建测评')}</div>
     ${list.map(a => `<div class="card">
       <div class="row"><strong>${esc(studentName(a.sid))}</strong>
         <span class="tag ${a.level === '薄弱' ? 'warn' : a.level === '优秀' ? '' : 'amber'}">${esc(a.subject || '')} ${esc(a.level || '')}</span>
@@ -522,7 +515,7 @@ function viewFeedbacks() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === fbSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-feedback">＋ 写反馈</button></div>
+    <div class="section-title"><h2>共 ${list.length} 条</h2>${pageActions('feedbacks','add-feedback','＋ 写反馈')}</div>
     ${list.map(f => {
     const photos = f.photos || [];
     return `<div class="card">
@@ -591,7 +584,7 @@ function viewPlans() {
         ${S.students.map(s => `<option value="${s.id}" ${s.id === plSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 个规划</h2><button class="btn sm primary" data-act="add-plan">＋ 创建规划</button></div>
+    <div class="section-title"><h2>共 ${list.length} 个规划</h2>${pageActions('plans','add-plan','＋ 创建规划')}</div>
     ${list.map(p => {
     const tasks = p.tasks || [];
     const done = tasks.filter(t => t.done).length;
@@ -626,57 +619,10 @@ function formPlan(p) {
     field('任务清单（每行一条）', `<textarea name="tasks">${esc(tasksText)}</textarea>`, '每天 2 道计算题\n每周一次错题回顾');
 }
 
-/* ---------------- 续费 ---------------- */
-function viewRenewals() {
-  const list = S.renewals.slice().sort((a, b) => (a.nextDue || '').localeCompare(b.nextDue || ''));
-  const overdue = list.filter(r => { const d = daysTo(r.nextDue); return d !== null && d < 0; });
-  return `
-    ${overdue.length ? `<div class="notice" style="margin-bottom:12px">⚠️ ${overdue.length} 名学生已逾期续费：${overdue.map(r => esc(studentName(r.sid))).join('、')}</div>` : ''}
-    <div class="section-title"><h2>共 ${list.length} 条</h2><button class="btn sm primary" data-act="add-renewal">＋ 添加续费</button></div>
-    ${list.map(r => {
-    const d = daysTo(r.nextDue);
-    const badge = d === null ? '<span class="tag gray">未设到期</span>'
-      : d < 0 ? `<span class="tag warn">逾期 ${-d} 天</span>`
-        : d === 0 ? '<span class="tag amber">今天到期</span>'
-          : `<span class="tag ${d <= 7 ? 'amber' : 'gray'}">${d} 天后到期</span>`;
-    return `<div class="card">
-        <div class="row"><strong>${esc(studentName(r.sid))}</strong>${badge}
-          <span class="spacer"></span><span class="meta">${esc(r.nextDue || '')}</span></div>
-        <div class="meta" style="margin-top:6px">${esc(r.service || '')} · ${esc(r.cycle || '')} · ${money(r.amount)}</div>
-        <div class="meta">上次缴费：${esc(r.lastPay || '—')}</div>
-        <div class="btns">
-          <button class="btn sm primary" data-act="pay" data-id="${r.id}">记一次缴费</button>
-          <button class="btn sm" data-act="edit-renewal" data-id="${r.id}">编辑</button>
-          <button class="btn sm danger" data-act="del-renewal" data-id="${r.id}">删除</button>
-        </div>
-      </div>`;
-  }).join('') || `<div class="empty">还没有续费记录</div>`}
-  `;
-}
-function formRenewal(r) {
-  r = r || {};
-  return field('学生', `<select name="sid">${studentOptions(r.sid)}</select>`) +
-    `<div class="grid2">
-      ${field('服务', input('service', r.service, '晚辅 / 上课'))}
-      ${field('周期', `<select name="cycle">${['月', '季', '半年', '年'].map(x => `<option ${r.cycle === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
-    </div>
-    <div class="grid2">
-      ${field('金额', input('amount', r.amount, '2000', 'number'))}
-      ${field('上次缴费', input('lastPay', r.lastPay, '', 'date'))}
-    </div>` +
-    field('下次到期', input('nextDue', r.nextDue, '', 'date'));
-}
-function addCycle(dateStr, cycle) {
-  const d = new Date((dateStr || today()) + 'T00:00:00');
-  const n = { '月': 1, '季': 3, '半年': 6, '年': 12 }[cycle] || 1;
-  d.setMonth(d.getMonth() + n);
-  return d.toISOString().slice(0, 10);
-}
-
 /* ---------------- 数据与备份 ---------------- */
 let expSid = '';
 function viewData() {
-  const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划', renewals: '续费' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
+  const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
   return `
     <div class="notice" style="margin-bottom:12px">
       数据只存在这台设备的浏览器里，不会上传。<b>换设备或清缓存前，请先导出备份。</b>
@@ -709,7 +655,6 @@ function viewData() {
         <button class="btn" data-act="xlsx-assessments">新生测评</button>
         <button class="btn" data-act="xlsx-feedbacks">上课反馈</button>
         <button class="btn" data-act="xlsx-plans">学习规划</button>
-        <button class="btn" data-act="xlsx-renewals">续费管理</button>
       </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
@@ -936,14 +881,6 @@ const EXPORT_DEF = {
         (p.tasks || []).filter(t => t.done).length, (p.tasks || []).length]),
     ],
   },
-  renewals: {
-    sheet: '续费管理', widths: [10, 10, 8, 10, 12, 12],
-    rows: (sid) => [
-      ['学生姓名', '服务', '周期', '金额', '上次缴费', '下次到期'],
-      ...S.renewals.filter(r => !sid || r.sid === sid)
-        .map(r => [studentName(r.sid), r.service, r.cycle, Number(r.amount) || '', r.lastPay, r.nextDue]),
-    ],
-  },
 };
 function exportExcel(key, sid) {
   const d = EXPORT_DEF[key];
@@ -998,12 +935,6 @@ function savePlan(o, id) {
   else S.plans.push({ id: uid(), start: today(), ...payload });
   saveKey('plans'); closeModal(); render(); toast('已保存');
 }
-function saveRenewal(o, id) {
-  if (!o.sid) return toast('请先添加学生');
-  if (id) Object.assign(S.renewals.find(x => x.id === id), o);
-  else S.renewals.push({ id: uid(), ...o });
-  saveKey('renewals'); closeModal(); render(); toast('已保存');
-}
 
 /* ---------------- 各模块新增入口 ---------------- */
 const OPEN = {
@@ -1012,7 +943,6 @@ const OPEN = {
   assessment: (sid) => openModal('新建测评报告', formAssessment({ sid }), '保存', (f) => saveAssessment(formData(f))),
   feedback: (sid) => { photoBuf = []; openModal('写上课反馈', formFeedback({ sid }), '保存', (f) => saveFeedback(formData(f))); renderPhotoPrev(); },
   plan: (sid) => openModal('创建学习规划', formPlan({ sid }), '保存', (f) => savePlan(formData(f))),
-  renewal: (sid) => openModal('添加续费记录', formRenewal({ sid }), '保存', (f) => saveRenewal(formData(f))),
 };
 
 /* ---------------- 事件 ---------------- */
@@ -1024,7 +954,7 @@ function bind() {
   document.getElementById('scrim').onclick = closeDrawer;
   document.getElementById('exportBtn').onclick = () => { location.hash = '#/data'; };
   document.getElementById('fab').onclick = () => {
-    const map = { students: 'student', contacts: 'contact', assessments: 'assessment', feedbacks: 'feedback', plans: 'plan', renewals: 'renewal' };
+    const map = { students: 'student', contacts: 'contact', assessments: 'assessment', feedbacks: 'feedback', plans: 'plan' };
     const fn = OPEN[map[current]];
     if (!fn) return;
     if (current !== 'students' && !S.students.length) return toast('请先添加学生');
@@ -1144,21 +1074,26 @@ function bind() {
       if (q !== 'student' && !S.students.length) return toast('请先添加学生');
       return OPEN[q] && OPEN[q]();
     }
-    if (act === 'go-renewals') { location.hash = '#/renewals'; return; }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
     if (act === 'del-student') {
       if (!confirm('删除该学生及其全部记录？')) return;
       S.students = S.students.filter(x => x.id !== id);
-      ['contacts', 'assessments', 'feedbacks', 'plans', 'renewals'].forEach(k => { S[k] = S[k].filter(x => x.sid !== id); saveKey(k); });
+      ['contacts', 'assessments', 'feedbacks', 'plans'].forEach(k => { S[k] = S[k].filter(x => x.sid !== id); saveKey(k); });
       await saveKey('students'); render(); return toast('已删除');
     }
+    if (act === 'add-student') return OPEN.student();
     if (act === 'add-contact') { if (!S.students.length) return toast('请先添加学生'); return OPEN.contact(sid); }
     if (act === 'add-assessment') { if (!S.students.length) return toast('请先添加学生'); return OPEN.assessment(sid); }
     if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }
     if (act === 'add-plan') { if (!S.students.length) return toast('请先添加学生'); return OPEN.plan(sid); }
-    if (act === 'add-renewal') { if (!S.students.length) return toast('请先添加学生'); return OPEN.renewal(sid); }
 
+    if (act === 'export-page') {
+      const mod = t.dataset.mod;
+      const sid = ({ contacts: conSid, assessments: assSid, feedbacks: fbSid, plans: plSid, students: '' })[mod] || '';
+      exportExcel(mod, sid);
+      return;
+    }
     if (act === 'edit-contact') return openModal('编辑沟通', formContact(S.contacts.find(x => x.id === id)), '保存', f => saveContact(formData(f), id));
     if (act === 'del-contact') { if (!confirm('删除这条沟通记录？')) return; S.contacts = S.contacts.filter(x => x.id !== id); await saveKey('contacts'); render(); return; }
 
@@ -1192,15 +1127,6 @@ function bind() {
       await saveKey('plans'); render(); return;
     }
 
-    if (act === 'edit-renewal') return openModal('编辑续费', formRenewal(S.renewals.find(x => x.id === id)), '保存', f => saveRenewal(formData(f), id));
-    if (act === 'del-renewal') { if (!confirm('删除这条续费记录？')) return; S.renewals = S.renewals.filter(x => x.id !== id); await saveKey('renewals'); render(); return; }
-    if (act === 'pay') {
-      const r = S.renewals.find(x => x.id === id);
-      if (!r) return;
-      r.lastPay = today();
-      r.nextDue = addCycle(today(), r.cycle);
-      await saveKey('renewals'); render(); return toast('已记录缴费，到期日已顺延');
-    }
 
     // 数据页
     if (act.startsWith('xlsx-')) {
