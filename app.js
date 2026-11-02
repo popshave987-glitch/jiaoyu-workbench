@@ -349,7 +349,8 @@ function viewStudents() {
 
 function pageActions(mod, addAct, addLabel) {
   return `<div class="row" style="gap:8px">
-    <button class="btn sm" data-act="export-page" data-mod="${mod}">导出</button>
+    <button class="btn sm" data-act="export-page" data-mod="${mod}">Excel</button>
+    <button class="btn sm" data-act="export-csv" data-mod="${mod}">CSV</button>
     ${addAct ? `<button class="btn sm primary" data-act="${addAct}">${addLabel}</button>` : ''}
   </div>`;
 }
@@ -687,9 +688,16 @@ function viewData() {
         <button class="btn" data-act="xlsx-feedbacks">上课反馈</button>
         <button class="btn" data-act="xlsx-plans">学习规划</button>
       </div>
+      <div class="data-row" style="margin-top:8px">
+        <button class="btn" data-act="export-csv" data-mod="students">学生 CSV</button>
+        <button class="btn" data-act="export-csv" data-mod="contacts">沟通 CSV</button>
+        <button class="btn" data-act="export-csv" data-mod="assessments">测评 CSV</button>
+        <button class="btn" data-act="export-csv" data-mod="feedbacks">反馈 CSV</button>
+        <button class="btn" data-act="export-csv" data-mod="plans">规划 CSV</button>
+      </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
-        导出为 .xlsx：表头加粗、冻结首行、可筛选，WPS / Excel 直接打开。JSON 用于换手机、换电脑时整库恢复。
+        Excel：表头加粗、冻结首行、可筛选（需用 WPS/Excel 打开）；手机上打不开时选 CSV，任何软件都能看。JSON 用于整库恢复。
       </div>
     </div>
     <div class="card">
@@ -940,6 +948,21 @@ function calcWidths(rows) {
   });
 }
 
+function toCSVText(rows) {
+  return '\ufeff' + rows.map(r => r.map(c => {
+    const v = String(c == null ? '' : c);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }).join(',')).join('\r\n');
+}
+function exportCsv(key, sid) {
+  const d = EXPORT_DEF[key];
+  if (!d) return;
+  const rows = d.rows(sid);
+  if (rows.length <= 1) return toast('所选范围内没有数据');
+  const who = sid ? studentName(sid) : '全部';
+  downloadBlob(`${d.sheet}_${who}_${today()}.csv`, new Blob([toCSVText(rows)], { type: 'text/csv;charset=utf-8' }));
+  toast('已导出 CSV');
+}
 function exportExcel(key, sid) {
   const d = EXPORT_DEF[key];
   if (!d) return;
@@ -1146,6 +1169,12 @@ function bind() {
     if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }
     if (act === 'add-plan') { if (!S.students.length) return toast('请先添加学生'); return OPEN.plan(sid); }
 
+    if (act === 'export-csv') {
+      const mod = t.dataset.mod;
+      const sid = ({ contacts: conSid, assessments: assSid, feedbacks: fbSid, plans: plSid, students: '' })[mod] || '';
+      exportCsv(mod, sid);
+      return;
+    }
     if (act === 'export-page') {
       const mod = t.dataset.mod;
       const sid = ({ contacts: conSid, assessments: assSid, feedbacks: fbSid, plans: plSid, students: '' })[mod] || '';
