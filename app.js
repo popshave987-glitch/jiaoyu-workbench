@@ -625,7 +625,7 @@ async function aiGeneratePoints() {
 
   const btn = document.querySelector('[data-act="ai-points"]');
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
-  const endpoint = cfg.endpoint || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+  const endpoint = cfg.endpoint || 'https://api.z.ai/api/paas/v4/chat/completions';
   const payload = {
     model: cfg.model,
     temperature: 0.2,
@@ -638,11 +638,15 @@ async function aiGeneratePoints() {
   const errs = [];
   for (let i = 0; i < cfg.keys.length; i++) {
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 25000);
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
         body: JSON.stringify(payload),
+        signal: ctrl.signal,
       });
+      clearTimeout(timer);
       if (!res.ok) { errs.push('Key' + (i + 1) + ':' + res.status); continue; }
       const data = await res.json();
       const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
@@ -656,7 +660,7 @@ async function aiGeneratePoints() {
       if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
       return;
     } catch (e) {
-      errs.push('Key' + (i + 1) + ':网络');
+      errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域'));
     }
   }
 
@@ -839,8 +843,8 @@ function viewData() {
       </div>
       <div class="field">
         <label>接口地址（留空 = 智谱）</label>
-        <input id="aiEndpoint" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions" value="${esc(aiCfg().endpoint || '')}" autocomplete="off">
-        <div class="tip" style="font-size:11.5px;color:#64748B">换服务商时改这里，如豆包：https://ark.cn-beijing.volces.com/api/v3/chat/completions</div>
+        <input id="aiEndpoint" placeholder="https://api.z.ai/api/paas/v4/chat/completions" value="${esc(aiCfg().endpoint || '')}" autocomplete="off">
+        <div class="tip" style="font-size:11.5px;color:#64748B">换服务商时改这里；留空默认用 api.z.ai（智谱海外域名，允许网页直连）</div>
       </div>
       <div class="btns">
         <button class="btn primary" data-act="save-ai">保存</button>
