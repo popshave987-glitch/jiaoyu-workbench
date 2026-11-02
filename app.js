@@ -181,10 +181,11 @@ function hideCombo() {
   comboInput = null; comboIdx = -1;
 }
 function pickCombo(i) {
-  if (!comboInput || i < 0 || i >= comboList.length) return;
-  comboInput.value = comboList[i];
+  const input = comboInput;
+  if (!input || i < 0 || i >= comboList.length) return;
+  input.value = comboList[i];
   hideCombo();
-  comboInput.focus();
+  if (input.focus) input.focus();
 }
 function formData(root) {
   const o = {};
