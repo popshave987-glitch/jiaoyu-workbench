@@ -24,8 +24,10 @@ async function loadAll() {
     const cur = tx.objectStore(STORE).openCursor();
     cur.onsuccess = (e) => {
       const c = e.target.result;
-      if (c) { if (KEYS.includes(c.key)) S[c.key] = c.value || []; c.continue(); }
-      else res();
+      if (c) {
+        if (KEYS.includes(c.key)) S[c.key] = Array.isArray(c.value) ? c.value : [];
+        c.continue();
+      } else res();
     };
   });
   db.close();
@@ -947,10 +949,17 @@ function route() {
 /* ---------------- 启动 ---------------- */
 (async function boot() {
   await loadAll();
+  KEYS.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
   bind();
   window.addEventListener('hashchange', route);
   route();
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => { });
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      reg.update().catch(() => { });
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadSW) location.reload();
+      });
+    }).catch(() => { });
   }
 })();
