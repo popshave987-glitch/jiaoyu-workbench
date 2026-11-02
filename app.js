@@ -25,7 +25,10 @@ async function loadAll() {
     cur.onsuccess = (e) => {
       const c = e.target.result;
       if (c) {
-        if (KEYS.includes(c.key)) S[c.key] = Array.isArray(c.value) ? c.value : [];
+        if (KEYS.includes(c.key)) {
+          const rec = c.value;
+          S[c.key] = (rec && Array.isArray(rec.v)) ? rec.v : [];
+        }
         c.continue();
       } else res();
     };
@@ -41,6 +44,47 @@ async function saveKey(key) {
     tx.onerror = () => rej(tx.error);
   });
   db.close();
+  scheduleBackup();
+}
+
+/* ---------------- 本机自动备份（localStorage 镜像） ---------------- */
+const LS_KEY = 'jiaoyu_auto_backup_v1';
+let backupTimer = null;
+
+function makeSnapshot() {
+  const data = {};
+  KEYS.forEach(k => {
+    data[k] = (S[k] || []).map(item => {
+      const copy = { ...item };
+      if (Array.isArray(copy.photos)) { copy.photoCount = copy.photos.length; delete copy.photos; }
+      return copy;
+    });
+  });
+  return { at: new Date().toISOString(), data };
+}
+function writeBackup() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(makeSnapshot())); } catch (_) { }
+}
+function scheduleBackup() {
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(writeBackup, 800);
+}
+function readBackup() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const b = JSON.parse(raw);
+    if (!b || !b.data) return null;
+    const total = KEYS.reduce((n, k) => n + ((b.data[k] || []).length), 0);
+    return { at: b.at, data: b.data, total };
+  } catch (_) { return null; }
+}
+function backupInfo() {
+  const b = readBackup();
+  if (!b) return '暂无自动备份';
+  const t = new Date(b.at);
+  const pad = n => String(n).padStart(2, '0');
+  return `${t.getMonth() + 1}月${t.getDate()}日 ${pad(t.getHours())}:${pad(t.getMinutes())} · ${b.total} 条`;
 }
 
 /* ---------------- 工具 ---------------- */
@@ -636,6 +680,16 @@ function viewData() {
       <h3 style="margin-top:0">数据量</h3>${counts}
     </div>
     <div class="card">
+      <h3 style="margin-top:0">本机自动备份</h3>
+      <div class="meta">最近备份：<b>${esc(backupInfo())}</b></div>
+      <div class="tip" style="margin-top:6px;font-size:12px;color:#64748B">
+        每次修改后约 1 秒自动写入本机备份（不含照片）。若发现记录为空，可从这里找回。
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn" data-act="restore-backup">从自动备份恢复</button>
+      </div>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">导出</h3>
       <div class="data-row">
         <button class="btn" data-act="csv-students">学生 CSV</button>
@@ -956,12 +1010,23 @@ function bind() {
     }
     if (act === 'json-export') {
       download(`教学助手备份_${today()}.json`, JSON.stringify(S, null, 2), 'application/json');
+      writeBackup();
       return toast('已导出备份');
     }
     if (act === 'clear-all') {
       if (!confirm('清空全部数据且不可恢复，确定？')) return;
       KEYS.forEach(k => S[k] = []);
+      try { localStorage.removeItem(LS_KEY); } catch (_) { }
       await Promise.all(KEYS.map(saveKey)); render(); return toast('已清空');
+    }
+    if (act === 'restore-backup') {
+      const b = readBackup();
+      if (!b || !b.total) return toast('没有可用的自动备份');
+      if (!confirm(`将用「${backupInfo()}」的备份覆盖当前数据，确定？\n（文字记录可恢复，错题照片无法恢复）`)) return;
+      KEYS.forEach(k => { S[k] = Array.isArray(b.data[k]) ? b.data[k] : []; });
+      await Promise.all(KEYS.map(saveKey));
+      render();
+      return toast('已从自动备份恢复');
     }
     if (act === 'print') return window.print();
   });
@@ -985,6 +1050,24 @@ function route() {
 (async function boot() {
   await loadAll();
   KEYS.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
+
+  // 记录为空但本机有自动备份 → 询问恢复
+  const total = KEYS.reduce((n, k) => n + S[k].length, 0);
+  const bak = readBackup();
+  if (total === 0 && bak && bak.total > 0) {
+    if (confirm(`本机记录为空。\n检测到自动备份（${backupInfo()}），是否恢复？\n（文字记录可恢复，错题照片无法恢复）`)) {
+      KEYS.forEach(k => { S[k] = Array.isArray(bak.data[k]) ? bak.data[k] : []; });
+      await Promise.all(KEYS.map(saveKey));
+    }
+  } else if (total > 0) {
+    writeBackup();
+  }
+
+  // 请求浏览器不要回收本站存储
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => { });
+  }
+
   bind();
   window.addEventListener('hashchange', route);
   route();
