@@ -279,24 +279,37 @@ function studentCard(s, compact) {
 
 /* ---------------- 学生 ---------------- */
 let stuQ = '', stuFilter = '';
-function viewStudents() {
-  const grades = [...new Set(S.students.map(s => s.grade).filter(Boolean))];
+function filteredStudents() {
   let list = S.students.slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''));
   if (stuQ) {
     const q = stuQ.toLowerCase();
     list = list.filter(s => (s.name + s.school + s.parent + s.note).toLowerCase().includes(q));
   }
   if (stuFilter) list = list.filter(s => s.grade === stuFilter);
+  return list;
+}
+function studentListHTML() {
+  const list = filteredStudents();
+  return list.map(s => studentCard(s, false)).join('') || `<div class="empty">没有匹配的学生</div>`;
+}
+function refreshStudentList() {
+  const box = document.getElementById('stuList');
+  if (box) box.innerHTML = studentListHTML();
+  const cnt = document.getElementById('stuCount');
+  if (cnt) cnt.textContent = `共 ${filteredStudents().length} 人`;
+}
+function viewStudents() {
+  const grades = [...new Set(S.students.map(s => s.grade).filter(Boolean))];
   return `
     <div class="searchbar">
-      <input id="stuQ" placeholder="搜索学生 / 学校 / 家长" value="${esc(stuQ)}">
+      <input id="stuQ" placeholder="搜索学生 / 学校 / 家长" value="${esc(stuQ)}" autocomplete="off">
       <select id="stuFilter">
         <option value="">全部年级</option>
         ${grades.map(g => `<option ${g === stuFilter ? 'selected' : ''}>${esc(g)}</option>`).join('')}
       </select>
     </div>
-    <div class="section-title"><h2>共 ${list.length} 人</h2><span class="hint">在读 ${S.students.filter(s => s.status !== '已结课').length} 人</span></div>
-    ${list.map(s => studentCard(s, false)).join('') || `<div class="empty">没有匹配的学生</div>`}
+    <div class="section-title"><h2 id="stuCount">共 ${filteredStudents().length} 人</h2><span class="hint">在读 ${S.students.filter(s => s.status !== '已结课').length} 人</span></div>
+    <div id="stuList">${studentListHTML()}</div>
   `;
 }
 
@@ -760,10 +773,27 @@ function bind() {
     fn();
   };
 
-  // 输入筛选
+  // 输入筛选（搜索框只刷新列表，避免打断中文输入法）
+  let stuTimer = null, stuComposing = false;
+  document.addEventListener('compositionstart', (e) => {
+    if (e.target.id === 'stuQ') stuComposing = true;
+  });
+  document.addEventListener('compositionend', (e) => {
+    if (e.target.id === 'stuQ') {
+      stuComposing = false;
+      stuQ = e.target.value;
+      clearTimeout(stuTimer);
+      stuTimer = setTimeout(refreshStudentList, 120);
+    }
+  });
   document.addEventListener('input', (e) => {
     if (e.target.matches && e.target.matches('input[data-combo]')) { showCombo(e.target); return; }
-    if (e.target.id === 'stuQ') { stuQ = e.target.value; render(); const i = document.getElementById('stuQ'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+    if (e.target.id === 'stuQ') {
+      stuQ = e.target.value;
+      if (stuComposing) return;
+      clearTimeout(stuTimer);
+      stuTimer = setTimeout(refreshStudentList, 250);
+    }
   });
 
   // 可搜索下拉：聚焦/键盘
@@ -791,7 +821,7 @@ function bind() {
   window.addEventListener('resize', hideCombo);
   document.addEventListener('change', async (e) => {
     const id = e.target.id;
-    if (id === 'stuFilter') { stuFilter = e.target.value; render(); }
+    if (id === 'stuFilter') { stuFilter = e.target.value; refreshStudentList(); }
     if (id === 'conSid') { conSid = e.target.value; render(); }
     if (id === 'assSid') { assSid = e.target.value; render(); }
     if (id === 'fbSid') { fbSid = e.target.value; render(); }
