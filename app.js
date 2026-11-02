@@ -581,16 +581,68 @@ function renderPointChips() {
   const box = document.getElementById('pointBox');
   if (!box) return;
   const topic = currentTopic();
-  const list = CHEM_TOPICS[topic] || [];
-  if (!list.length) {
-    box.innerHTML = `<div class="tip">${topic ? '这个主题没有内置考点，可直接在「需要加强点」里手写' : '先在上面填或选一个考点主题'}</div>`;
+  if (!pointBuf.length) {
+    const list = CHEM_TOPICS[topic] || [];
+    if (list.length) pointBuf = list.map(t => ({ t, lv: 0 }));
+  }
+  if (!pointBuf.length) {
+    box.innerHTML = `<div class="tip">${topic ? '没有内置考点，可点「AI 生成考点」，或直接在下面手写' : '先在上面填或选一个考点主题'}</div>`;
     return;
   }
-  box.innerHTML = list.map((t, i) => {
-    const lv = pointBuf[i] ? pointBuf[i].lv : 0;
-    return `<button type="button" class="chip lv${lv}" data-act="toggle-point" data-idx="${i}">${esc(t)} · ${POINT_LV[lv]}</button>`;
+  box.innerHTML = pointBuf.map((p, i) => {
+    const lv = p.lv || 0;
+    return `<button type="button" class="chip lv${lv}" data-act="toggle-point" data-idx="${i}">${esc(p.t)} · ${POINT_LV[lv]}</button>`;
   }).join('');
 }
+
+/* ---------------- 豆包 AI（可选，自带 Key） ---------------- */
+const AI_KEY = 'doubao_ai_cfg_v1';
+function aiCfg() {
+  try { return JSON.parse(localStorage.getItem(AI_KEY) || '{}') || {}; } catch (_) { return {}; }
+}
+function saveAiCfg(cfg) {
+  try { localStorage.setItem(AI_KEY, JSON.stringify(cfg)); } catch (_) { }
+}
+function aiReady() { const c = aiCfg(); return !!(c.key && c.model); }
+
+async function aiGeneratePoints() {
+  const cfg = aiCfg();
+  if (!cfg.key || !cfg.model) return toast('请先在「数据与备份」里填豆包 API Key 和模型');
+  const topic = currentTopic();
+  if (!topic) return toast('请先填写本节考点主题');
+
+  const btn = document.querySelector('[data-act="ai-points"]');
+  if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+  try {
+    const res = await fetch(cfg.endpoint || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
+          { role: 'user', content: `请列出「${topic}」这个主题最常考的 6 个具体考点，每个不超过 12 个字，面向中学生。只输出 JSON 字符串数组，例如 ["考点1","考点2"]。` },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error('接口返回 ' + res.status);
+    const data = await res.json();
+    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    const m = text.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('返回格式不对');
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr) || !arr.length) throw new Error('没有拿到考点');
+    pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 20), lv: 0 }));
+    renderPointChips();
+    toast('已生成 ' + pointBuf.length + ' 个考点，点一下标记掌握情况');
+  } catch (e) {
+    toast('生成失败：' + (e && e.message ? e.message : '网络错误'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+  }
+}
+
 function formFeedback(f) {
   f = f || {};
   return field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
@@ -599,7 +651,10 @@ function formFeedback(f) {
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
     field('本节考点', combo('topic', f.topic, '如 氧化还原反应 / 溶液与溶解度曲线', Object.keys(CHEM_TOPICS)), '填主题后自动列出考点，点一下切换：会 → 半会 → 不会') +
-    field('考点掌握', `<div id="pointBox" class="chips"></div>`) +
+    field('考点掌握', `<div class="row" style="justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:11.5px;color:#64748B">点一下切换：会 → 半会 → 不会</span>
+      <button type="button" class="btn sm" data-act="ai-points">AI 生成考点</button>
+    </div><div id="pointBox" class="chips"></div>`) +
     field('课堂笔记', textarea('notes', f.notes || f.content, '本次讲了 CO₂ 的制取、装置气密性检查…')) +
     field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
     field('课后作业', textarea('homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式')) +
@@ -740,6 +795,25 @@ function viewData() {
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
         导出为 .xlsx：表头加粗、冻结首行、可筛选。手机上请下载后用 WPS/Excel 打开（浏览器内预览可能显示空白）。JSON 用于整库恢复。
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">豆包 AI（可选）</h3>
+      <div class="meta">填写后，「AI 生成考点」按钮才生效。Key 只存在这台设备，不上传。</div>
+      <div class="field" style="margin-top:10px">
+        <label>API Key</label>
+        <input id="aiKey" type="password" placeholder="粘贴方舟 API Key" value="${esc(aiCfg().key || '')}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>模型 / 接入点 ID</label>
+        <input id="aiModel" placeholder="如 doubao-seed-1-6-250615 或 ep-xxxx" value="${esc(aiCfg().model || '')}" autocomplete="off">
+      </div>
+      <div class="btns">
+        <button class="btn primary" data-act="save-ai">保存</button>
+        <button class="btn" data-act="clear-ai">清除</button>
+      </div>
+      <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
+        在火山方舟控制台「在线推理」里创建接入点后复制。新用户有免费额度，超出按量计费。
       </div>
     </div>
     <div class="card">
@@ -1229,6 +1303,21 @@ function bind() {
     if (act === 'copy-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) copyText(feedbackText(f), '反馈已复制，去微信粘贴'); return; }
     if (act === 'share-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) { shareFeedback(f); } return; }
     if (act === 'dl-photos') { const f = S.feedbacks.find(x => x.id === id); if (f) downloadPhotos(f); return; }
+    if (act === 'ai-points') { aiGeneratePoints(); return; }
+    if (act === 'save-ai') {
+      const k = (document.getElementById('aiKey').value || '').trim();
+      const m = (document.getElementById('aiModel').value || '').trim();
+      if (!k || !m) return toast('Key 和模型都要填');
+      saveAiCfg({ key: k, model: m });
+      render();
+      return toast('已保存，写反馈时可以点「AI 生成考点」');
+    }
+    if (act === 'clear-ai') {
+      if (!confirm('清除已保存的豆包 Key？')) return;
+      try { localStorage.removeItem(AI_KEY); } catch (_) { }
+      render();
+      return toast('已清除');
+    }
     if (act === 'toggle-point') {
       const i = +t.dataset.idx;
       if (pointBuf[i]) { pointBuf[i].lv = (pointBuf[i].lv + 1) % 3; renderPointChips(); }
