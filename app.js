@@ -598,49 +598,70 @@ function renderPointChips() {
 /* ---------------- 豆包 AI（可选，自带 Key） ---------------- */
 const AI_KEY = 'doubao_ai_cfg_v1';
 function aiCfg() {
-  try { return JSON.parse(localStorage.getItem(AI_KEY) || '{}') || {}; } catch (_) { return {}; }
+  try {
+    const c = JSON.parse(localStorage.getItem(AI_KEY) || '{}') || {};
+    if (!Array.isArray(c.keys)) c.keys = c.key ? [c.key] : [];
+    return c;
+  } catch (_) { return { keys: [] }; }
 }
 function saveAiCfg(cfg) {
   try { localStorage.setItem(AI_KEY, JSON.stringify(cfg)); } catch (_) { }
 }
-function aiReady() { const c = aiCfg(); return !!(c.key && c.model); }
+function aiReady() { const c = aiCfg(); return !!(c.keys && c.keys.length && c.model); }
 
 async function aiGeneratePoints() {
   const cfg = aiCfg();
-  if (!cfg.key || !cfg.model) return toast('请先在「数据与备份」里填豆包 API Key 和模型');
+  if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填豆包 Key 和模型');
   const topic = currentTopic();
   if (!topic) return toast('请先填写本节考点主题');
 
   const btn = document.querySelector('[data-act="ai-points"]');
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
-  try {
-    const res = await fetch(cfg.endpoint || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
-      body: JSON.stringify({
-        model: cfg.model,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
-          { role: 'user', content: `请列出「${topic}」这个主题最常考的 6 个具体考点，每个不超过 12 个字，面向中学生。只输出 JSON 字符串数组，例如 ["考点1","考点2"]。` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error('接口返回 ' + res.status);
-    const data = await res.json();
-    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-    const m = text.match(/\[[\s\S]*\]/);
-    if (!m) throw new Error('返回格式不对');
-    const arr = JSON.parse(m[0]);
-    if (!Array.isArray(arr) || !arr.length) throw new Error('没有拿到考点');
-    pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 20), lv: 0 }));
-    renderPointChips();
-    toast('已生成 ' + pointBuf.length + ' 个考点，点一下标记掌握情况');
-  } catch (e) {
-    toast('生成失败：' + (e && e.message ? e.message : '网络错误'));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+  const endpoint = cfg.endpoint || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+  const payload = {
+    model: cfg.model,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
+      { role: 'user', content: `请列出「${topic}」这个主题最常考的 6 个具体考点，每个不超过 12 个字，面向中学生。只输出 JSON 字符串数组，例如 ["考点1","考点2"]。` },
+    ],
+  };
+
+  const errs = [];
+  for (let i = 0; i < cfg.keys.length; i++) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { errs.push('Key' + (i + 1) + ':' + res.status); continue; }
+      const data = await res.json();
+      const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+      const m = text.match(/\[[\s\S]*\]/);
+      if (!m) { errs.push('Key' + (i + 1) + ':格式'); continue; }
+      const arr = JSON.parse(m[0]);
+      if (!Array.isArray(arr) || !arr.length) { errs.push('Key' + (i + 1) + ':空'); continue; }
+      pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 20), lv: 0 }));
+      renderPointChips();
+      toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (i + 1) + '）');
+      if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+      return;
+    } catch (e) {
+      errs.push('Key' + (i + 1) + ':网络');
+    }
   }
+
+  // 全部失败 → 回落到内置考点（仅当该主题有）
+  const fallback = CHEM_TOPICS[topic] || [];
+  if (fallback.length) {
+    pointBuf = fallback.map(t => ({ t, lv: 0 }));
+    renderPointChips();
+    toast('所有 Key 都不可用（' + errs.join(' / ') + '），已用内置考点');
+  } else {
+    toast('所有 Key 都不可用：' + errs.join(' / '));
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
 }
 
 function formFeedback(f) {
@@ -801,8 +822,8 @@ function viewData() {
       <h3 style="margin-top:0">豆包 AI（可选）</h3>
       <div class="meta">填写后，「AI 生成考点」按钮才生效。Key 只存在这台设备，不上传。</div>
       <div class="field" style="margin-top:10px">
-        <label>API Key</label>
-        <input id="aiKey" type="password" placeholder="粘贴方舟 API Key" value="${esc(aiCfg().key || '')}" autocomplete="off">
+        <label>API Key（可填多个，一行一个，用完自动换下一个）</label>
+        <textarea id="aiKeys" placeholder="每行一个 Key" style="min-height:84px">${esc((aiCfg().keys || []).join('\n'))}</textarea>
       </div>
       <div class="field">
         <label>模型 / 接入点 ID</label>
@@ -1305,10 +1326,10 @@ function bind() {
     if (act === 'dl-photos') { const f = S.feedbacks.find(x => x.id === id); if (f) downloadPhotos(f); return; }
     if (act === 'ai-points') { aiGeneratePoints(); return; }
     if (act === 'save-ai') {
-      const k = (document.getElementById('aiKey').value || '').trim();
+      const raw = (document.getElementById('aiKeys').value || '').split('\n').map(x => x.trim()).filter(Boolean);
       const m = (document.getElementById('aiModel').value || '').trim();
-      if (!k || !m) return toast('Key 和模型都要填');
-      saveAiCfg({ key: k, model: m });
+      if (!raw.length || !m) return toast('至少一个 Key，且模型要填');
+      saveAiCfg({ keys: raw, model: m });
       render();
       return toast('已保存，写反馈时可以点「AI 生成考点」');
     }
