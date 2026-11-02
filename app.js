@@ -882,13 +882,40 @@ const EXPORT_DEF = {
     ],
   },
 };
+/* 计算列宽：中文按 2 个字符宽，长文本列设上限，日期列保证够宽 */
+function displayWidth(str) {
+  let w = 0;
+  for (const ch of String(str)) {
+    w += /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(ch) ? 2 : 1;
+  }
+  return w;
+}
+const LONG_COLS = ['课堂笔记', '课后作业', '阶段目标', '备注', '沟通内容', '任务清单', '优势', '薄弱', '跟进事项'];
+function calcWidths(rows) {
+  const headers = (rows[0] || []).map(String);
+  return headers.map((h, i) => {
+    const isDate = h.includes('日期') || h.includes('缴费') || h.includes('到期');
+    const isLong = LONG_COLS.includes(h);
+    let w = displayWidth(h) + 3;
+    const limit = Math.min(rows.length, 300);
+    for (let r = 1; r < limit; r++) {
+      const cell = String(rows[r][i] == null ? '' : rows[r][i]);
+      const lineW = Math.max(...cell.split('\n').map(displayWidth), 0);
+      if (lineW + 2 > w) w = lineW + 2;
+    }
+    const min = isDate ? 15 : 9;
+    const cap = isDate ? 18 : (isLong ? 34 : 22);
+    return Math.max(min, Math.min(w, cap));
+  });
+}
+
 function exportExcel(key, sid) {
   const d = EXPORT_DEF[key];
   if (!d) return;
   const rows = d.rows(sid);
   if (rows.length <= 1) return toast('所选范围内没有数据');
   const who = sid ? studentName(sid) : '全部';
-  downloadBlob(`${d.sheet}_${who}_${today()}.xlsx`, xlsxBlob(rows, d.widths, d.sheet));
+  downloadBlob(`${d.sheet}_${who}_${today()}.xlsx`, xlsxBlob(rows, calcWidths(rows), d.sheet));
   toast('已导出 Excel');
 }
 /* ---------------- 表单提交 ---------------- */
