@@ -509,7 +509,7 @@ function viewFeedbacks() {
   let list = S.feedbacks.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   if (fbSid) list = list.filter(f => f.sid === fbSid);
   return `
-    <div class="notice blue" style="margin-bottom:12px">上课反馈：填「内容 / 掌握 / 待加强 / 作业」，点复制直接发给家长。</div>
+    <div class="notice blue" style="margin-bottom:12px">上课反馈：填完点「复制反馈」发文字；有错题照片时，点「分享(含照片)」可连同图片一起发。</div>
     <div class="searchbar">
       <select id="fbSid"><option value="">全部学生</option>
         ${S.students.map(s => `<option value="${s.id}" ${s.id === fbSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
@@ -534,6 +534,8 @@ function viewFeedbacks() {
       ${photos.length ? `<div class="photos">${photos.map((p, i) => `<div class="photo"><img src="${p}" alt="错题 ${i + 1}"><button data-act="view-photo" data-id="${f.id}" data-idx="${i}">⤢</button></div>`).join('')}</div>` : ''}
       <div class="btns">
         <button class="btn sm" data-act="copy-feedback" data-id="${f.id}">复制反馈</button>
+        ${photos.length ? `<button class="btn sm primary" data-act="share-feedback" data-id="${f.id}">分享(含照片)</button>
+        <button class="btn sm" data-act="dl-photos" data-id="${f.id}">下载照片</button>` : ''}
         <button class="btn sm" data-act="edit-feedback" data-id="${f.id}">编辑</button>
         <button class="btn sm danger" data-act="del-feedback" data-id="${f.id}">删除</button>
       </div>
@@ -573,6 +575,35 @@ function feedbackText(f) {
 —— 车老师`;
 }
 
+/* 分享/保存错题照片 */
+function dataUrlToFile(dataUrl, name) {
+  const parts = String(dataUrl).split(',');
+  const mime = (parts[0].match(/data:([^;]+);/) || [])[1] || 'image/jpeg';
+  const bin = atob(parts[1] || '');
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new File([arr], name, { type: mime });
+}
+async function shareFeedback(f) {
+  const text = feedbackText(f);
+  const photos = f.photos || [];
+  const files = photos.map((p, i) => dataUrlToFile(p, `${studentName(f.sid)}_错题${i + 1}.jpg`));
+  if (files.length && navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ text, files }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  copyText(text, '文字已复制；照片请用「下载照片」后一起发送');
+  if (files.length) downloadPhotos(f);
+}
+function downloadPhotos(f) {
+  (f.photos || []).forEach((p, i) => {
+    const a = document.createElement('a');
+    a.href = p;
+    a.download = `${studentName(f.sid)}_错题${i + 1}.jpg`;
+    a.click();
+  });
+  toast('照片已下载到相册/下载目录');
+}
 /* ---------------- 规划 ---------------- */
 let plSid = '';
 function viewPlans() {
@@ -1137,6 +1168,8 @@ function bind() {
     }
     if (act === 'del-feedback') { if (!confirm('删除这条反馈？')) return; S.feedbacks = S.feedbacks.filter(x => x.id !== id); await saveKey('feedbacks'); render(); return; }
     if (act === 'copy-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) copyText(feedbackText(f), '反馈已复制，去微信粘贴'); return; }
+    if (act === 'share-feedback') { const f = S.feedbacks.find(x => x.id === id); if (f) { shareFeedback(f); } return; }
+    if (act === 'dl-photos') { const f = S.feedbacks.find(x => x.id === id); if (f) downloadPhotos(f); return; }
     if (act === 'del-photo') { photoBuf.splice(+t.dataset.idx, 1); renderPhotoPrev(); return; }
     if (act === 'view-photo') {
       const f = S.feedbacks.find(x => x.id === id);
