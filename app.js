@@ -827,7 +827,12 @@ function viewData() {
       </div>
       <div class="field">
         <label>模型 / 接入点 ID</label>
-        <input id="aiModel" placeholder="如 doubao-seed-1-6-250615 或 ep-xxxx" value="${esc(aiCfg().model || '')}" autocomplete="off">
+        <input id="aiModel" placeholder="豆包：doubao-seed-1-6-250615 或 ep-xxxx｜智谱：glm-4.7-flash" value="${esc(aiCfg().model || '')}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>接口地址（留空 = 火山方舟）</label>
+        <input id="aiEndpoint" placeholder="https://ark.cn-beijing.volces.com/api/v3/chat/completions" value="${esc(aiCfg().endpoint || '')}" autocomplete="off">
+        <div class="tip" style="font-size:11.5px;color:#64748B">换服务商时改这里，如智谱：https://open.bigmodel.cn/api/paas/v4/chat/completions</div>
       </div>
       <div class="btns">
         <button class="btn primary" data-act="save-ai">保存</button>
@@ -1328,8 +1333,9 @@ function bind() {
     if (act === 'save-ai') {
       const raw = (document.getElementById('aiKeys').value || '').split('\n').map(x => x.trim()).filter(Boolean);
       const m = (document.getElementById('aiModel').value || '').trim();
+      const ep = (document.getElementById('aiEndpoint').value || '').trim();
       if (!raw.length || !m) return toast('至少一个 Key，且模型要填');
-      saveAiCfg({ keys: raw, model: m });
+      saveAiCfg({ keys: raw, model: m, endpoint: ep });
       render();
       return toast('已保存，写反馈时可以点「AI 生成考点」');
     }
