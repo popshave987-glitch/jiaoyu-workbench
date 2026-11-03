@@ -285,3 +285,18 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .cls-tab.active{background:var(--secondary,#028090);border-color:var(--secondary,#028090);color:#fff;font-weight:600}
 .cls-tab.active .n{color:rgba(255,255,255,.85)}
 .tag.cls{background:#E6F4F7;color:#028090;border-color:#BFE3E9;font-weight:600}
+
+/* 富文本课堂笔记 */
+.rt-tool{display:flex;gap:6px;margin-bottom:6px}
+.rt-btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 10px;font-size:12.5px;color:var(--dark);cursor:pointer}
+.rt-btn:active{background:#F1F5F9}
+.rt{border:1px solid var(--line);border-radius:10px;min-height:120px;max-height:280px;overflow:auto;padding:10px 12px;background:#fff;font-size:13.5px;line-height:1.75;outline:none}
+.rt:focus{border-color:var(--secondary,#028090)}
+.rt:empty::before{content:attr(data-ph);color:#A3B1BF;font-size:12.5px}
+.rt .nli{position:relative;padding-left:16px;margin:2px 0}
+.rt .nli::before{content:"•";position:absolute;left:2px;color:var(--secondary,#028090);font-weight:700}
+.rt div{margin:1px 0}
+.chip.note{max-width:100%;text-align:left;line-height:1.5;font-size:12.5px;white-space:normal;border-radius:12px;padding:6px 11px;
+  border:1px solid var(--line);background:#fff;color:#334155}
+.chip.note.on{background:#E6F4F7;border-color:#028090;color:#026B78;font-weight:600}
+.chip.note.on::before{content:"✓ ";color:#028090}

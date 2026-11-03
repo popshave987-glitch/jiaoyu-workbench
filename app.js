@@ -180,6 +180,7 @@ const COMBO_SRC = {
   grade: () => uniq(['初一', '初二', '初三', '高一', '高二', '高三'].concat(S.students.map(s => s.grade))),
   school: () => uniq(S.students.map(s => s.school)),
   cls: () => uniq(['九慧1班', '九慧2班', '九慧小3班', '高一班'].concat(S.students.map(s => s.cls))),
+  topic: () => uniq(Object.keys(CHEM_TOPICS).concat(S.feedbacks.map(f => f.topic))),
   subject: () => uniq(['化学', '数学', '物理', '英语', '语文', '生物'].concat(
     S.students.flatMap(s => String(s.subjects || '').split(/[，,、\s]+/)))),
 };
@@ -578,15 +579,18 @@ function currentTopic() {
 }
 function initPoints(f) {
   const topic = (f && f.topic || '').trim();
+  const old = (f && f.points) || [];
+  if (old.length) { pointBuf = old.map(p => ({ t: p.t, on: p.on !== undefined ? !!p.on : true })); return; }
   const list = CHEM_TOPICS[topic] || [];
-  pointBuf = list.map(t => {
-    const old = (f && f.points || []).find(x => x.t === t);
-    return { t, lv: old ? old.lv : 0 };
-  });
+  pointBuf = list.map(t => ({ t, on: false }));
 }
 function renderPointChips() {
   const box = document.getElementById('pointBox');
   if (!box) return;
+  box.innerHTML = pointBuf.length
+    ? pointBuf.map((p, i) => `<button type="button" class="chip note${p.on ? ' on' : ''}" data-act="toggle-note" data-idx="${i}" title="${esc(p.t)}">${esc(p.t)}</button>`).join('')
+    : `<div class="tip" style="font-size:12px;color:#94A3B8">还没有考点：先填主题，再点「AI 生成考点」</div>`;
+  return;
   const topic = currentTopic();
   if (!pointBuf.length) {
     const list = CHEM_TOPICS[topic] || [];
@@ -637,8 +641,8 @@ async function aiGeneratePoints() {
     model: cfg.model,
     temperature: 0.2,
     messages: [
-      { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
-      { role: 'user', content: `请列出「${topic}」这个主题最常考的 6 个具体考点，每个不超过 12 个字，面向中学生。只输出 JSON 字符串数组，例如 ["考点1","考点2"]。` },
+      { role: 'system', content: '你是初中/高中化学老师，为课堂笔记写知识点，只输出 JSON 数组，不要解释。' },
+      { role: 'user', content: `围绕「${topic}」生成 6 条可直接写进学生课堂笔记的要点：每条一句话，18–40 字，含具体知识、公式或易错点，面向中学生。只输出 JSON 字符串数组，例如 ["氧化还原的本质是电子转移，化合价升降总数相等","配平先配变价元素，再用观察法补平"]。` },
     ],
   };
 
@@ -661,7 +665,7 @@ async function aiGeneratePoints() {
       if (!m) { errs.push('Key' + (i + 1) + ':格式'); continue; }
       const arr = JSON.parse(m[0]);
       if (!Array.isArray(arr) || !arr.length) { errs.push('Key' + (i + 1) + ':空'); continue; }
-      pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 20), lv: 0 }));
+      pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 60), on: false }));
       renderPointChips();
       toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (i + 1) + '）');
       if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
@@ -674,7 +678,7 @@ async function aiGeneratePoints() {
   // 全部失败 → 回落到内置考点（仅当该主题有）
   const fallback = CHEM_TOPICS[topic] || [];
   if (fallback.length) {
-    pointBuf = fallback.map(t => ({ t, lv: 0 }));
+    pointBuf = fallback.map(t => ({ t, on: false }));
     renderPointChips();
     toast('所有 Key 都不可用（' + errs.join(' / ') + '），已用内置考点');
   } else {
@@ -691,12 +695,17 @@ function formFeedback(f) {
       ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
-    field('本节考点', combo('topic', f.topic, '如 氧化还原反应 / 溶液与溶解度曲线', Object.keys(CHEM_TOPICS)), '填主题后自动列出考点，点一下切换：会 → 半会 → 不会') +
-    field('考点掌握', `<div class="row" style="justify-content:space-between;margin-bottom:4px">
-      <span style="font-size:11.5px;color:#64748B">点一下切换：会 → 半会 → 不会</span>
+    field('本节考点', combo('topic', f.topic, '选过或输新的主题，再点 AI 生成', COMBO_SRC.topic()), '如 氧化还原反应 / 溶液与溶解度曲线') +
+    field('考点选择', `<div class="row" style="justify-content:space-between;margin-bottom:6px">
+      <span style="font-size:11.5px;color:#64748B">点一项写进课堂笔记；再点一次整行删掉</span>
       <button type="button" class="btn sm" data-act="ai-points">AI 生成考点</button>
     </div><div id="pointBox" class="chips"></div>`) +
-    field('课堂笔记', textarea('notes', f.notes || f.content, '本次讲了 CO₂ 的制取、装置气密性检查…')) +
+    field('课堂笔记', `<div class="rt-tool">
+        <button type="button" class="rt-btn" data-act="rt-bold"><b>B</b></button>
+        <button type="button" class="rt-btn" data-act="rt-li">• 项目</button>
+        <button type="button" class="rt-btn" data-act="rt-clear">清空</button>
+      </div><div class="rt" id="notesEditor" contenteditable="true" data-ph="点 AI 生成考点，或手动写本节内容…"></div>
+      <input type="hidden" name="notes" value="">`, '支持加粗、项目符号；手动改过也能按行删除考点') +
     field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
     field('课后作业', textarea('homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式')) +
     field('进步点', input('progress', f.progress || f.good, '方程式配平正确率明显提高')) +
@@ -712,7 +721,7 @@ function feedbackText(f) {
   const photos = (f.photos || []).length;
   return `【${st ? st.name : '学生'} · ${f.subject || '化学'} 课堂反馈】
 日期：${f.date || '—'}
-课堂笔记：${f.notes || f.content || '—'}
+课堂笔记：${htmlToNotes(f.notes || f.content || '') || '—'}
 课堂表现：${f.performance || '—'}
 课后作业：${f.homework || f.task || '—'}
 进步点：${f.progress || f.good || '—'}
@@ -750,6 +759,62 @@ function downloadPhotos(f) {
   });
   toast('照片已下载到相册/下载目录');
 }
+/* ---------------- 富文本笔记 + 考点选择 ---------------- */
+function noteEditor() { return document.getElementById('notesEditor'); }
+function elText(el) { return el ? (el.innerText != null ? el.innerText : el.textContent) : ''; }
+function noteEls() { const ed = noteEditor(); return ed ? [...ed.querySelectorAll('.nli')] : []; }
+function syncNotes() {
+  const ed = noteEditor();
+  const hidden = document.querySelector('#modal [name=notes]');
+  if (ed && hidden) hidden.value = ed.innerHTML;
+}
+function renderNotesEditor(notes) {
+  const ed = noteEditor(); if (!ed) return;
+  const raw = String(notes || '');
+  ed.innerHTML = /<[a-z][\s\S]*>/i.test(raw)
+    ? raw
+    : raw.split('\n').filter(l => l.trim()).map(l => `<div>${esc(l)}</div>`).join('');
+  pointBuf.forEach(p => { p.on = noteEls().some(el => elText(el).includes(p.t)); });
+  syncNotes();
+  renderPointChips();
+}
+function toggleNotePoint(i) {
+  const p = pointBuf[i]; const ed = noteEditor();
+  if (!p || !ed) return;
+  if (p.on) {
+    p.on = false;
+    noteEls().filter(el => elText(el).includes(p.t)).forEach(el => el.remove());
+  } else {
+    p.on = true;
+    if (!noteEls().some(el => elText(el).includes(p.t))) {
+      const d = document.createElement('div');
+      d.className = 'nli';
+      d.textContent = p.t;
+      ed.appendChild(d);
+    }
+  }
+  syncNotes(); renderPointChips();
+}
+function addBulletLine() {
+  const ed = noteEditor(); if (!ed) return;
+  const d = document.createElement('div');
+  d.className = 'nli'; d.innerHTML = '<br>';
+  ed.appendChild(d);
+  const r = document.createRange(); r.selectNodeContents(d); r.collapse(true);
+  const sel = window.getSelection(); if (sel) { sel.removeAllRanges(); sel.addRange(r); }
+  ed.focus(); syncNotes();
+}
+function htmlToNotes(html) {
+  const box = document.createElement('div');
+  box.innerHTML = String(html || '');
+  const items = [...box.querySelectorAll('.nli')].map(el => '• ' + elText(el).replace(/\s+/g, ' ').trim());
+  const rest = [...box.childNodes]
+    .filter(n => !(n.nodeType === 1 && n.classList && n.classList.contains('nli')))
+    .map(n => elText(n).trim()).filter(Boolean);
+  const out = [...items, ...rest].join('\n').trim();
+  return out || elText(box).trim();
+}
+
 /* ---------------- 规划 ---------------- */
 let plSid = '';
 function viewPlans() {
@@ -949,7 +1014,7 @@ function openCourseFeedback(cid, sid) {
   if (old && (old.points || []).length) pointBuf = old.points.slice();
   openModal(`写反馈 · ${studentName(sid)}`, formFeedback({ sid, courseId: cid, date: c.date, subject: c.subject, ...(old || {}) }),
     '保存', f => saveFeedback(formData(f), old ? old.id : null));
-  renderPhotoPrev(); renderPointChips();
+  renderPhotoPrev(); renderPointChips(); renderNotesEditor(old ? (old.notes || old.content) : '');
 }
 
 /* ---------------- 课后反馈表（模板导出） ---------------- */
@@ -976,7 +1041,7 @@ function tplSheet(cls, subtitle, students, fbOf) {
       { v: f.progress || f.good || '', s: 0 },
       { v: f.weak || '', s: 0 },
       { v: f.dictation || '', s: 0 },
-      { v: [pointsBrief(f), f.notes || f.content || ''].filter(Boolean).join('\n'), s: 0 },
+      { v: htmlToNotes(f.notes || f.content || ''), s: 0 },
     ]);
   });
   rows.push([{ v: TPL_GUIDE, s: 3 }]);
@@ -1442,7 +1507,12 @@ function saveFeedback(o, id) {
   delete o.photos;
   o.photos = photoBuf.slice();
   o.topic = (o.topic || '').trim();
-  o.points = pointBuf.filter(p => p && p.t).map(p => ({ t: p.t, lv: p.lv }));
+  const ed = document.getElementById('notesEditor');
+  if (ed) {
+    o.notes = ed.innerHTML;
+    o.notesText = elText(ed).trim();
+  }
+  o.points = pointBuf.filter(p => p && p.t).map(p => ({ t: p.t, on: !!p.on }));
   if (id) Object.assign(S.feedbacks.find(x => x.id === id), o);
   else S.feedbacks.push({ id: uid(), ...o });
   saveKey('feedbacks'); closeModal(); render(); toast('已保存');
@@ -1466,7 +1536,7 @@ const OPEN = {
   student: () => openModal('添加学生', formStudent(), '保存', (f) => saveStudent(formData(f))),
   contact: (sid) => openModal('记录家长沟通', formContact({ sid }), '保存', (f) => saveContact(formData(f))),
   assessment: (sid) => openModal('新建测评报告', formAssessment({ sid }), '保存', (f) => saveAssessment(formData(f))),
-  feedback: (sid) => { photoBuf = []; initPoints({ topic: '' }); openModal('写上课反馈', formFeedback({ sid }), '保存', (f) => saveFeedback(formData(f))); renderPhotoPrev(); renderPointChips(); },
+  feedback: (sid) => { photoBuf = []; initPoints({ topic: '' }); openModal('写上课反馈', formFeedback({ sid }), '保存', (f) => saveFeedback(formData(f))); renderPhotoPrev(); renderPointChips(); renderNotesEditor(''); },
   plan: (sid) => openModal('创建学习规划', formPlan({ sid }), '保存', (f) => savePlan(formData(f))),
 };
 
@@ -1612,6 +1682,15 @@ function bind() {
     }
     if (act === 'add-student') return OPEN.student();
     if (act === 'filter-cls') { stuCls = t.dataset.cls || ''; render(); return; }
+    if (act === 'toggle-note') { toggleNotePoint(+t.dataset.idx); return; }
+    if (act === 'rt-bold') { document.execCommand('bold'); syncNotes(); return; }
+    if (act === 'rt-li') { addBulletLine(); return; }
+    if (act === 'rt-clear') {
+      const ed = noteEditor();
+      if (ed) ed.innerHTML = '';
+      pointBuf.forEach(p => { p.on = false; });
+      syncNotes(); renderPointChips(); return;
+    }
     if (act === 'add-contact') { if (!S.students.length) return toast('请先添加学生'); return OPEN.contact(sid); }
     if (act === 'add-assessment') { if (!S.students.length) return toast('请先添加学生'); return OPEN.assessment(sid); }
     if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }
