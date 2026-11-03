@@ -539,15 +539,15 @@ function currentTopic() {
 function initPoints(f) {
   const topic = (f && f.topic || '').trim();
   const old = (f && f.points) || [];
-  if (old.length) { pointBuf = old.map(p => ({ t: p.t, on: p.on !== undefined ? !!p.on : true })); return; }
+  if (old.length) { pointBuf = old.map(p => ({ t: p.t, on: p.on !== undefined ? !!p.on : true, busy: false })); return; }
   const list = CHEM_TOPICS[topic] || [];
-  pointBuf = list.map(t => ({ t, on: false }));
+  pointBuf = list.map(t => ({ t, on: false, busy: false }));
 }
 function renderPointChips() {
   const box = document.getElementById('pointBox');
   if (!box) return;
   box.innerHTML = pointBuf.length
-    ? pointBuf.map((p, i) => `<button type="button" class="chip note${p.on ? ' on' : ''}" data-act="toggle-note" data-idx="${i}" title="${esc(p.t)}">${esc(p.t)}</button>`).join('')
+    ? pointBuf.map((p, i) => `<button type="button" class="chip note${p.on ? ' on' : ''}${p.busy ? ' busy' : ''}" data-act="toggle-note" data-idx="${i}" title="${esc(p.t)}" ${p.busy ? 'disabled' : ''}>${p.busy ? '生成中… ' : ''}${esc(p.t)}</button>`).join('')
     : `<div class="tip" style="font-size:12px;color:#94A3B8">还没有考点：先填主题，再点「AI 生成考点」</div>`;
   return;
   const topic = currentTopic();
@@ -587,80 +587,98 @@ function saveAiCfg(cfg) {
 }
 function aiReady() { const c = aiCfg(); return !!(c.keys && c.keys.length && c.model); }
 
-async function aiGeneratePoints() {
+const aiDetailCache = {};
+
+async function aiChat(messages) {
   const cfg = aiCfg();
-  if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填智谱 API Key 和模型');
-  const topic = currentTopic();
-  if (!topic) return toast('请先填写本节考点主题');
-
-  const btn = document.querySelector('[data-act="ai-points"]');
-  if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+  if (!cfg.keys.length || !cfg.model) throw new Error('未配置 API Key');
   const endpoint = cfg.endpoint || 'https://api.z.ai/api/paas/v4/chat/completions';
-  const payload = {
-    model: cfg.model,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: '你是初中/高中化学老师，为课堂笔记写知识点，只输出 JSON 数组，不要解释。' },
-      { role: 'user', content: `围绕「${topic}」生成 6 条可直接写进学生课堂笔记的要点：每条一句话，18–40 字，含具体知识、公式或易错点，面向中学生。只输出 JSON 字符串数组，例如 ["氧化还原的本质是电子转移，化合价升降总数相等","配平先配变价元素，再用观察法补平"]。` },
-    ],
-  };
-
-  const errs = [];
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
   const models = [cfg.model];
   if (cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
-
+  const errs = [];
   for (let i = 0; i < cfg.keys.length; i++) {
     for (const model of models) {
-      let stopKey = false;
-      for (let attempt = 0; attempt < 3 && !stopKey; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 25000);
         try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 25000);
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
-            body: JSON.stringify({ ...payload, model }),
+            body: JSON.stringify({ model, temperature: 0.2, messages }),
             signal: ctrl.signal,
           });
           clearTimeout(timer);
           if (!res.ok) {
-            const code = res.status;
-            if ((code === 429 || code >= 500) && attempt < 2) { await sleep(1200 * (attempt + 1)); continue; }
-            errs.push('Key' + (i + 1) + ':' + codeMsg(code));
-            stopKey = true; break;
+            if ((res.status === 429 || res.status >= 500) && attempt < 2) { await sleep(1200 * (attempt + 1)); continue; }
+            errs.push('Key' + (i + 1) + ':' + codeMsg(res.status)); break;
           }
           const data = await res.json();
           const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-          const m = text.match(/\[[\s\S]*\]/);
-          if (!m) { errs.push('Key' + (i + 1) + ':格式'); stopKey = true; break; }
-          const arr = JSON.parse(m[0]);
-          if (!Array.isArray(arr) || !arr.length) { errs.push('Key' + (i + 1) + ':空'); stopKey = true; break; }
-          pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 60), on: false }));
-          renderPointChips();
-          toast('已生成 ' + pointBuf.length + ' 条要点（' + model + '）');
-          if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
-          return;
+          if (!text) { errs.push('Key' + (i + 1) + ':空'); break; }
+          return text;
         } catch (e) {
+          clearTimeout(timer);
           if (e.name === 'AbortError' && attempt < 2) { await sleep(800); continue; }
-          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域'));
-          stopKey = true;
+          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域')); break;
         }
       }
     }
   }
+  throw new Error(errs.slice(0, 2).join(' / ') || '未知错误');
+}
 
-  // 全部失败 → 回落到内置考点（仅当该主题有）
-  const fallback = CHEM_TOPICS[topic] || [];
-  if (fallback.length) {
-    pointBuf = fallback.map(t => ({ t, on: false }));
+async function aiGeneratePoints() {
+  const cfg = aiCfg();
+  if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填 API Key 和模型');
+  const topic = currentTopic();
+  if (!topic) return toast('请先填写本节考点主题');
+  const btn = document.querySelector('[data-act="ai-points"]');
+  if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+  try {
+    const text = await aiChat([
+      { role: 'system', content: '你是初中/高中化学老师，只输出 JSON 数组，不要解释。' },
+      { role: 'user', content: `请列出「${topic}」最常考的 6 个考点名称，每个 4–12 个字，简短、能直接当标签。只输出 JSON 字符串数组，例如 ["氧化还原本质","电子守恒配平"]。` },
+    ]);
+    const m = text.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('格式异常');
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr) || !arr.length) throw new Error('返回为空');
+    pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 16), on: false, busy: false }));
     renderPointChips();
-    toast('AI 暂不可用（' + errs.slice(0, 2).join(' / ') + '），已用内置要点，可稍后再点');
-  } else {
-    toast('AI 暂不可用：' + errs.join(' / ') + '，请稍后重试');
+    toast('已生成 ' + pointBuf.length + ' 个考点，点选后自动写详细笔记');
+  } catch (e) {
+    const fallback = CHEM_TOPICS[topic] || [];
+    if (fallback.length) {
+      pointBuf = fallback.map(t => ({ t, on: false, busy: false }));
+      renderPointChips();
+      toast('AI 暂不可用（' + String(e.message || e).slice(0, 24) + '），已用内置考点');
+    } else {
+      toast('AI 暂不可用：' + String(e.message || e).slice(0, 40));
+    }
   }
   if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+}
+
+async function aiExplainPoint(label) {
+  if (aiDetailCache[label]) return aiDetailCache[label];
+  const text = await aiChat([
+    { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
+    { role: 'user', content: `针对考点「${label}」：\n1) key：核心知识，一句话 20–40 字；\n2) wrong：常见易错点，一句话 15–30 字。\n只输出 JSON：{"key":"…","wrong":"…"}` },
+  ]);
+  const m = text.match(/\{[\s\S]*\}/);
+  let out = '';
+  if (m) {
+    try {
+      const o = JSON.parse(m[0]);
+      out = [o.key && ('要点：' + String(o.key).trim()), o.wrong && ('易错：' + String(o.wrong).trim())].filter(Boolean).join('；');
+    } catch (_) { }
+  }
+  if (!out) out = String(text).replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s*\n+\s*/g, '；').slice(0, 140);
+  aiDetailCache[label] = out;
+  return out;
 }
 
 function formFeedback(f) {
@@ -750,27 +768,39 @@ function renderNotesEditor(notes) {
   ed.innerHTML = /<[a-z][\s\S]*>/i.test(raw)
     ? raw
     : raw.split('\n').filter(l => l.trim()).map(l => `<div>${esc(l)}</div>`).join('');
-  pointBuf.forEach(p => { p.on = noteEls().some(el => elText(el).includes(p.t)); });
+  pointBuf.forEach(p => { p.on = noteEls().some(el => el.dataset.tag === p.t || elText(el).includes(p.t)); });
   syncNotes();
   renderPointChips();
 }
-function toggleNotePoint(i) {
+async function toggleNotePoint(i) {
   const p = pointBuf[i]; const ed = noteEditor();
-  if (!p || !ed) return;
+  if (!p || !ed || p.busy) return;
+  const pick = (el) => el.dataset.tag === p.t || elText(el).includes(p.t);
   if (p.on) {
     p.on = false;
-    noteEls().filter(el => elText(el).includes(p.t)).forEach(el => el.remove());
-  } else {
-    p.on = true;
-    if (!noteEls().some(el => elText(el).includes(p.t))) {
-      const d = document.createElement('div');
-      d.className = 'nli';
-      d.textContent = p.t;
-      ed.appendChild(d);
-    }
+    noteEls().filter(pick).forEach(el => el.remove());
+    syncNotes(); renderPointChips();
+    return;
   }
+  p.on = true; p.busy = true;
+  renderPointChips();
+  const el = document.createElement('div');
+  el.className = 'nli';
+  el.dataset.tag = p.t;
+  el.textContent = `${p.t}：生成中…`;
+  ed.appendChild(el);
+  syncNotes();
+  try {
+    const detail = await aiExplainPoint(p.t);
+    el.textContent = `${p.t}｜${detail}`;
+  } catch (e) {
+    el.textContent = p.t;
+    toast('要点生成失败（' + String(e.message || e).slice(0, 24) + '），可稍后再点');
+  }
+  p.busy = false;
   syncNotes(); renderPointChips();
 }
+
 function addBulletLine() {
   const ed = noteEditor(); if (!ed) return;
   const d = document.createElement('div');
