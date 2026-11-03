@@ -645,11 +645,11 @@ async function aiChat(messages, opt) {
   const endpoint = cfg.endpoint || 'https://api.z.ai/api/paas/v4/chat/completions';
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
-  const models = [cfg.model];
-  if (cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
+  const models = opt.model ? [opt.model] : [cfg.model];
+  if (!opt.model && cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
   const keyOrder = cfg.keys.map((k, i) => i);
   if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
-  if (aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
+  if (!opt.model && aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
   const userAborted = () => !!(opt.signal && opt.signal.aborted);
   const errs = [];
   for (const i of keyOrder) {
@@ -1336,6 +1336,7 @@ const AI_COLUMNS = {
 let aiLog = [];
 let aiBusy = false;
 let aiAbort = null;
+let aiAttach = null;   // {kind:'image'|'text', dataUrl?, text?, name}
 let aiPending = null;
 
 function loadAiLog() {
@@ -1417,7 +1418,7 @@ function aiParse(text) {
   return { reply: t, action: { type: 'none' } };
 }
 
-async function aiRun(text, signal) {
+async function aiRun(text, signal, imageDataUrl) {
   const history = aiLog.filter(m => m.role !== 'sys').slice(-6).map(m => ({
     role: m.role === 'u' ? 'user' : 'assistant', content: m.text,
   }));
@@ -1425,9 +1426,14 @@ async function aiRun(text, signal) {
     { role: 'system', content: aiSystemPrompt() },
     { role: 'system', content: '当前数据快照（JSON）：' + JSON.stringify(aiSnapshot(text)) },
     ...history,
-    { role: 'user', content: text },
+    imageDataUrl
+      ? { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: imageDataUrl } }] }
+      : { role: 'user', content: text },
   ];
-  const r = await aiChat(messages, { temperature: 0.1, maxTokens: 1200, signal });
+  const r = await aiChat(messages, {
+    temperature: 0.1, maxTokens: 1200, signal,
+    model: imageDataUrl ? 'glm-4v-flash' : '',
+  });
   return aiParse(r.text);
 }
 
@@ -1468,6 +1474,12 @@ function viewAi() {
         <button class="chip" data-act="ai-chip" data-q="帮我新建一节明天的化学课，学生有${esc(S.students[0] ? S.students[0].name : '某学生')}">新建课程</button>
         <button class="chip" data-act="ai-chip" data-q="出一份${esc(S.students[0] ? S.students[0].name : '某学生')}最近的课堂表现和学习要点报表">学生报表</button>
       </div>
+      <div class="ai-attach-row">
+        <button class="btn sm" data-act="ai-attach">📎 图片 / 文件</button>
+        <input type="file" id="aiFile" accept="image/*,.txt,.csv,.md,.json,.xlsx,.xls" hidden>
+        ${aiAttach ? `<span class="ai-attach-chip">${aiAttach.kind === 'image' ? '🖼️' : '📄'} ${esc(aiAttach.name)}${aiAttach.note ? ' · ' + esc(aiAttach.note) : ''}<button data-act="ai-unattach">×</button></span>` : '<span class="meta" style="font-size:11.5px">支持图片、txt/csv、Excel（xlsx/xls）</span>'}
+      </div>
+      ${aiAttach && aiAttach.kind === 'image' ? `<div class="ai-preview"><img src="${aiAttach.dataUrl}" alt="预览"></div>` : ''}
       <div class="ai-input">
         <textarea id="aiInput" rows="2" placeholder="例如：帮我把九慧1班的学生导成表格"></textarea>
         <button class="btn primary" data-act="ai-send">发送</button>
@@ -1549,10 +1561,84 @@ function aiBusyUi(on) {
   if (inp) inp.disabled = !!on;
 }
 
+const AI_IMG_EXT = ['png', 'jpg', 'jpeg', 'webp', 'heic', 'gif'];
+const AI_TXT_EXT = ['txt', 'csv', 'md', 'json'];
+const AI_XLS_EXT = ['xlsx', 'xls'];
+function aiFileKind(file) {
+  const n = String(file.name || '').toLowerCase();
+  const ext = n.split('.').pop();
+  if (AI_IMG_EXT.includes(ext) || String(file.type || '').startsWith('image/')) return 'image';
+  if (AI_XLS_EXT.includes(ext)) return 'excel';
+  if (AI_TXT_EXT.includes(ext)) return 'text';
+  return 'blocked';
+}
+function aiShrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1024;
+        let w = img.width, h = img.height;
+        if (Math.max(w, h) > max) { const k = max / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL('image/jpeg', 0.72));
+      };
+      img.onerror = () => reject(new Error('图片读取失败'));
+      img.src = fr.result;
+    };
+    fr.onerror = () => reject(fr.error || new Error('读取失败'));
+    fr.readAsDataURL(file);
+  });
+}
+async function aiReadSheet(file) {
+  if (typeof XLSX === 'undefined') throw new Error('Excel 解析组件没加载（请检查网络后重开）');
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('表格是空的');
+  const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
+  const lines = csv.split('\n').slice(0, 60).map(l => l.slice(0, 300));
+  return { text: lines.join('\n').slice(0, 15000), rows: Math.min(60, csv.split('\n').length), sheet: wb.SheetNames[0] };
+}
+async function aiPickFile(file) {
+  const kind = aiFileKind(file);
+  if (kind === 'blocked') {
+    toast('暂不支持该文件：只支持图片、txt/csv/md/json、Excel（xlsx/xls）');
+    return;
+  }
+  try {
+    if (kind === 'image') {
+      if (file.size > 12 * 1024 * 1024) return toast('图片太大（>12MB），请先裁小');
+      const dataUrl = await aiShrinkImage(file);
+      aiAttach = { kind: 'image', dataUrl, name: file.name || '图片' };
+    } else if (kind === 'excel') {
+      const r = await aiReadSheet(file);
+      aiAttach = { kind: 'text', text: r.text, name: file.name, note: `已读取「${r.sheet}」前 ${r.rows} 行` };
+    } else {
+      if (file.size > 300 * 1024) return toast('文本文件太大（>300KB）');
+      const text = await file.text();
+      aiAttach = { kind: 'text', text: text.slice(0, 15000), name: file.name };
+    }
+    render();
+    toast('已添加：' + file.name);
+  } catch (e) {
+    toast('读取失败：' + (e.message || e));
+  }
+}
+
 async function aiSend(text) {
   if (!aiReady()) return toast('请先在「数据与备份」里填写 API Key 和模型');
-  const q = String(text || '').trim();
-  if (!q) return;
+  let q = String(text || '').trim();
+  if (aiAttach && aiAttach.kind === 'text') {
+    q = (q || '请分析这个文件内容') + '\n\n【文件 ' + aiAttach.name + '】\n' + aiAttach.text;
+  }
+  if (!q && !aiAttach) return;
+  if (aiAttach && aiAttach.kind === 'image' && !confirm('将把这张图片发送给智谱用于识别，是否继续？')) return;
+  const img = aiAttach && aiAttach.kind === 'image' ? aiAttach.dataUrl : null;
+  const shown = (q || '（图片）').slice(0, 400) + (img ? '\n[附件图片]' : '');
   if (aiBusy) return;
   const blocked = aiBlockedWord(q);
   if (blocked) {
@@ -1561,7 +1647,7 @@ async function aiSend(text) {
     saveAiLog(); render();
     return;
   }
-  aiLog.push({ role: 'u', text: q });
+  aiLog.push({ role: 'u', text: shown });
   saveAiLog(); render();
   const box = document.getElementById('aiChat');
   if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
@@ -1569,7 +1655,7 @@ async function aiSend(text) {
   aiAbort = new AbortController();
   aiBusyUi(true);
   try {
-    const r = await aiRun(q, aiAbort.signal);
+    const r = await aiRun(q, aiAbort.signal, img);
     const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
     if (r.action && r.action.type === 'create_course') m.status = 'pending';
     aiLog.push(m); saveAiLog();
@@ -1580,6 +1666,7 @@ async function aiSend(text) {
   }
   aiBusy = false;
   aiAbort = null;
+  aiAttach = null;
   saveAiLog(); render();
   aiBusyUi(false);
   setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
@@ -2348,6 +2435,12 @@ function bind() {
   document.addEventListener('change', async (e) => {
     if (e.target.id === 'statSid') { statSid = e.target.value; render(); return; }
     const id = e.target.id;
+    if (e.target.id === 'aiFile') {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) await aiPickFile(f);
+      return;
+    }
     if (id === 'conSid') { conSid = e.target.value; render(); }
     if (id === 'assSid') { assSid = e.target.value; render(); }
     if (id === 'plSid') { plSid = e.target.value; render(); }
@@ -2421,9 +2514,16 @@ function bind() {
     }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
+    if (act === 'ai-attach') {
+      const f = document.getElementById('aiFile');
+      if (f) f.click();
+      return;
+    }
+    if (act === 'ai-unattach') { aiAttach = null; render(); return; }
     if (act === 'ai-new') {
       if (aiLog.length && !confirm('新开对话？当前对话内容会被清空。')) return;
       aiLog = [];
+      aiAttach = null;
       saveAiLog(); render();
       toast('已新开对话');
       return;
@@ -2431,6 +2531,7 @@ function bind() {
     if (act === 'ai-del') {
       if (!confirm('删除全部对话记录？删除后不可恢复。')) return;
       aiLog = [];
+      aiAttach = null;
       try { localStorage.removeItem(AI_CHAT_KEY); } catch (_) { }
       render();
       toast('对话记录已删除');
