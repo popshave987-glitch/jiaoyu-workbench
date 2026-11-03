@@ -97,6 +97,20 @@ public class MainActivity extends Activity {
         });
     }
 
+    void shareFile(final Uri uri, final String name, final String mime, final String chooserTitle) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType(mime);
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, name);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(send, chooserTitle));
+            }
+        });
+    }
+
     void pickDbFile() {
         runOnUiThread(new Runnable() {
             @Override

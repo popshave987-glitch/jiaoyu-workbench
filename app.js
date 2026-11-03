@@ -335,6 +335,7 @@ function studentCard(s, compact) {
     ${compact ? '' : `<div class="btns">
       <button class="btn sm" data-act="add-contact" data-sid="${s.id}">记沟通</button>
       <button class="btn sm" data-act="add-assessment" data-sid="${s.id}">做测评</button>
+      <button class="btn sm" data-act="student-pdf" data-id="${s.id}">导出 PDF</button>
       <button class="btn sm danger" data-act="del-student" data-id="${s.id}">删除</button>
     </div>
     <div class="card-foot">
@@ -828,6 +829,18 @@ async function shareFeedback(f) {
 }
 async function downloadPhotos(f) {
   const photos = f.photos || [];
+  if (hasNative() && typeof NATIVE.saveToGallery === 'function') {
+    let ok = 0, share = 0, legacy = 0;
+    for (const p of photos) {
+      if (typeof p === 'string' && p.indexOf('data:') === 0) { legacy++; continue; }
+      const r = String(NATIVE.saveToGallery(p) || '');
+      if (r === 'OK') ok++; else if (r === 'SHARE') share++;
+    }
+    if (ok) return toast(`已保存 ${ok} 张到相册「Pictures/教育工作台」`);
+    if (share) return toast('系统版本较低，请用「分享(含照片)」保存');
+    if (legacy) return toast('旧格式照片请用「分享(含照片)」保存');
+    return toast('没有可保存的照片');
+  }
   for (let i = 0; i < photos.length; i++) {
     try {
       const p = photos[i];
@@ -1785,6 +1798,14 @@ function bind() {
     }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
+    if (act === 'student-pdf') {
+      if (!hasNative() || typeof NATIVE.exportStudentPdf !== 'function') return toast('网页版请用浏览器打印为 PDF');
+      try {
+        const r = String(NATIVE.exportStudentPdf(id, studentName(id)) || '');
+        if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
+        return toast('PDF 已生成，选择「保存到文件」或发微信');
+      } catch (e) { return toast('导出失败：' + (e.message || e)); }
+    }
     if (act === 'del-student') {
       if (!confirm('删除该学生及其全部记录？')) return;
       S.students = S.students.filter(x => x.id !== id);

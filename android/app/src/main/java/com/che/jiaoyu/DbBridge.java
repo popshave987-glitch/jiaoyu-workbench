@@ -172,6 +172,24 @@ public class DbBridge {
     }
 
     @JavascriptInterface
+    public String exportStudentPdf(String sid, String name) {
+        try {
+            closeDb();
+            File pdf = PdfExporter.build(act.getApplicationContext(), dbFile(), sid, name);
+            Uri uri = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", pdf);
+            act.shareFile(uri, pdf.getName(), "application/pdf", "导出 PDF");
+            return pdf.getAbsolutePath();
+        } catch (Throwable e) {
+            return "ERR:" + e.getMessage();
+        }
+    }
+
+    @JavascriptInterface
+    public String saveToGallery(String photoName) {
+        return PdfExporter.saveToGallery(act.getApplicationContext(), photoName);
+    }
+
+    @JavascriptInterface
     public String info() {
         SQLiteDatabase d = db();
         JSONObject o = new JSONObject();
