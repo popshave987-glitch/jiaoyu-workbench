@@ -935,6 +935,7 @@ function formPlan(p) {
 /* ---------------- 课程管理 ---------------- */
 const COURSE_SUBJECTS = ['化学', '数学', '物理', '英语', '语文', '生物', '历史', '地理', '政治'];
 const DEFAULT_TIMES = { start: '08:00', end: '17:00' };
+const TEACHER_NAME = '车老师---车金露';
 let curCourse = '';
 let coursePick = null; // Set<sid>：导出勾选，默认全选
 
@@ -1136,7 +1137,7 @@ function exportCourse(cid, onlySids) {
   if (!sids.length) return toast('没有可导出的学生');
   const groups = groupByClass(sids.map(studentById).filter(Boolean));
   const sheets = Object.keys(groups).sort().map(cls => tplSheet(
-    cls, `上课日期：${fmtCn(c.date)}     授课教师：__________`, groups[cls], s => courseFb(cid, s.id)));
+    cls, `上课日期：${fmtCn(c.date)}     授课教师：${TEACHER_NAME}`, groups[cls], s => courseFb(cid, s.id)));
   if (!sheets.length) return toast('没有可导出的学生');
   downloadBlob(`${fileSafe(c.date)}_${fileSafe(courseTitle(c))}_课后反馈表.xlsx`, xlsxSheets(sheets));
   toast(`已导出 ${sheets.length} 个班`);
@@ -1146,7 +1147,7 @@ function exportRoster() {
   if (!S.students.length) return toast('还没有学生');
   const groups = groupByClass(S.students);
   const sheets = Object.keys(groups).sort().map(cls => tplSheet(
-    cls, '上课日期：____ 年 __ 月 __ 日     授课教师：__________', groups[cls], () => null));
+    cls, `上课日期：____ 年 __ 月 __ 日     授课教师：${TEACHER_NAME}`, groups[cls], () => null));
   downloadBlob(`学生名单_${today()}.xlsx`, xlsxSheets(sheets));
   toast('已导出学生名单');
 }
