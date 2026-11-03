@@ -145,7 +145,7 @@ function renderNav() {
 let modalOk = null;
 function openModal(title, bodyHTML, okText, onOk) {
   document.getElementById('modal').innerHTML =
-    `<h3>${title}</h3>${bodyHTML}<div class="modal-actions">
+    `<div class="modal-bar"><button class="modal-x" data-act="modal-cancel" aria-label="关闭">✕</button></div><h3>${title}</h3>${bodyHTML}<div class="modal-actions">
       <button class="btn" data-act="modal-cancel">取消</button>
       <button class="btn primary" data-act="modal-ok">${okText || '保存'}</button>
     </div>`;
@@ -288,8 +288,9 @@ function studentCard(s, compact) {
   const cnt = {
     c: S.contacts.filter(x => x.sid === s.id).length,
     a: S.assessments.filter(x => x.sid === s.id).length,
-    f: S.feedbacks.filter(x => x.sid === s.id).length,
   };
+  const att = S.courses.filter(x => (x.sids || []).includes(s.id) && String(x.date || '') <= today()).length;
+  const hasToday = S.courses.some(x => (x.sids || []).includes(s.id) && x.date === today());
   return `<div class="card">
     <div class="card-head">
       <div class="avatar">${esc(initials(s.name))}</div>
@@ -306,7 +307,10 @@ function studentCard(s, compact) {
       <button class="btn sm" data-act="add-assessment" data-sid="${s.id}">做测评</button>
       <button class="btn sm danger" data-act="del-student" data-id="${s.id}">删除</button>
     </div>
-    <div class="meta" style="margin-top:8px">沟通 ${cnt.c} 条 · 测评 ${cnt.a} 份 · 反馈 ${cnt.f} 条</div>`}
+    <div class="card-foot">
+      <span class="meta">沟通 ${cnt.c} 条 · 测评 ${cnt.a} 份 · 已上 ${att} 节课</span>
+      ${hasToday ? `<span class="today-badge">📅 今日有课</span>` : ''}
+    </div>`}
   </div>`;
 }
 
@@ -602,31 +606,48 @@ async function aiGeneratePoints() {
   };
 
   const errs = [];
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
+  const models = [cfg.model];
+  if (cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
+
   for (let i = 0; i < cfg.keys.length; i++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 25000);
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) { errs.push('Key' + (i + 1) + ':' + res.status); continue; }
-      const data = await res.json();
-      const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-      const m = text.match(/\[[\s\S]*\]/);
-      if (!m) { errs.push('Key' + (i + 1) + ':格式'); continue; }
-      const arr = JSON.parse(m[0]);
-      if (!Array.isArray(arr) || !arr.length) { errs.push('Key' + (i + 1) + ':空'); continue; }
-      pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 60), on: false }));
-      renderPointChips();
-      toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (i + 1) + '）');
-      if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
-      return;
-    } catch (e) {
-      errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域'));
+    for (const model of models) {
+      let stopKey = false;
+      for (let attempt = 0; attempt < 3 && !stopKey; attempt++) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 25000);
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
+            body: JSON.stringify({ ...payload, model }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(timer);
+          if (!res.ok) {
+            const code = res.status;
+            if ((code === 429 || code >= 500) && attempt < 2) { await sleep(1200 * (attempt + 1)); continue; }
+            errs.push('Key' + (i + 1) + ':' + codeMsg(code));
+            stopKey = true; break;
+          }
+          const data = await res.json();
+          const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+          const m = text.match(/\[[\s\S]*\]/);
+          if (!m) { errs.push('Key' + (i + 1) + ':格式'); stopKey = true; break; }
+          const arr = JSON.parse(m[0]);
+          if (!Array.isArray(arr) || !arr.length) { errs.push('Key' + (i + 1) + ':空'); stopKey = true; break; }
+          pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 60), on: false }));
+          renderPointChips();
+          toast('已生成 ' + pointBuf.length + ' 条要点（' + model + '）');
+          if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+          return;
+        } catch (e) {
+          if (e.name === 'AbortError' && attempt < 2) { await sleep(800); continue; }
+          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域'));
+          stopKey = true;
+        }
+      }
     }
   }
 
@@ -635,9 +656,9 @@ async function aiGeneratePoints() {
   if (fallback.length) {
     pointBuf = fallback.map(t => ({ t, on: false }));
     renderPointChips();
-    toast('所有 Key 都不可用（' + errs.join(' / ') + '），已用内置考点');
+    toast('AI 暂不可用（' + errs.slice(0, 2).join(' / ') + '），已用内置要点，可稍后再点');
   } else {
-    toast('所有 Key 都不可用：' + errs.join(' / '));
+    toast('AI 暂不可用：' + errs.join(' / ') + '，请稍后重试');
   }
   if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
 }
