@@ -1339,7 +1339,7 @@ function saveAiLog() {
   try { localStorage.setItem(AI_CHAT_KEY, JSON.stringify(aiLog.slice(-30))); } catch (_) { }
 }
 
-function aiSnapshot() {
+function aiSnapshot(question) {
   const stu = S.students.slice(0, 40).map(st => {
     const x = studentStats(st.id);
     return {
@@ -1357,7 +1357,25 @@ function aiSnapshot() {
       日期: f.date || '', 学生: studentName(f.sid), 评价: f.rating || '',
       考点: String(f.topic || '').slice(0, 20), 需加强: String(f.weak || '').slice(0, 30),
     }));
-  return { 学生: stu, 最近课程: courses, 最近反馈: fbs };
+  const q = String(question || '');
+  const hit = S.students.filter(st => q.includes(st.name)).slice(0, 3);
+  const detail = hit.map(st => {
+    const x = studentStats(st.id);
+    const list = S.feedbacks.filter(f => f.sid === st.id)
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 15)
+      .map(f => ({
+        日期: f.date || '', 科目: f.subject || '', 评价: f.rating || '', 考点: f.topic || '',
+        课堂表现: f.performance || '', 课后作业: f.homework || f.task || '',
+        进步点: f.progress || f.good || '', 需加强: f.weak || '', 默写: f.dictation || '',
+        笔记: htmlToNotes(f.notes || f.content || '').replace(/\s+/g, ' ').slice(0, 100),
+      }));
+    return {
+      姓名: st.name, 班级: classOf(st), 年级: st.grade || '', 学校: st.school || '', 状态: st.status || '',
+      课次: x.courses, 反馈数: x.fbs, 平均评价: x.avg ? +x.avg.toFixed(2) : null,
+      最近上课: x.lastCourse || '', 反馈记录: list,
+    };
+  });
+  return { 学生: stu, 最近课程: courses, 最近反馈: fbs, 命中的学生详情: detail };
 }
 
 function aiSystemPrompt() {
@@ -1369,7 +1387,12 @@ function aiSystemPrompt() {
     '3) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
     '导出列必须在白名单内：',
     JSON.stringify(AI_COLUMNS),
-    '规则：回答用中文，简洁给结论+依据；不编造数据；数据不足就说不足；答案尽量可执行（给出下一步建议）。',
+    '硬性规则（必须遵守）：',
+    '- 只能使用快照里出现的数据，禁止编造任何姓名、日期、分数、评价或事件。',
+    '- 某个字段在快照里为空，就写「未记录」，不要猜。',
+    '- 做学生报表时，必须写清数据范围（如「基于 2026-10-01 ~ 2026-11-03 的 6 条反馈」）和总课次。',
+    '- 如果快照里没有用户问的学生，回答「没有找到该学生」并列出快照里最接近的几个姓名；不要虚构。',
+    '- 回答用中文，结论在前、依据在后；数据不足就说不足；结尾给一条可执行建议。',
     '输出格式必须严格为单个 JSON 对象：{"reply":"给用户看的文字","action":{"type":"none"}}。不要输出 JSON 以外的任何内容。',
   ].join('\n');
 }
@@ -1393,11 +1416,11 @@ async function aiRun(text) {
   }));
   const messages = [
     { role: 'system', content: aiSystemPrompt() },
-    { role: 'system', content: '当前数据快照（JSON）：' + JSON.stringify(aiSnapshot()) },
+    { role: 'system', content: '当前数据快照（JSON）：' + JSON.stringify(aiSnapshot(text)) },
     ...history,
     { role: 'user', content: text },
   ];
-  const r = await aiChat(messages, { temperature: 0.2, maxTokens: 900 });
+  const r = await aiChat(messages, { temperature: 0.1, maxTokens: 1200 });
   return aiParse(r.text);
 }
 
@@ -1429,7 +1452,8 @@ function viewAi() {
         <button class="chip" data-act="ai-chip" data-q="给我这周的整体情况：课次、反馈、谁没上课">本周概览</button>
         <button class="chip" data-act="ai-chip" data-q="哪些学生超过两周没上课了？">久未上课</button>
         <button class="chip" data-act="ai-chip" data-q="把本月的反馈记录导出成表格">导出本月反馈</button>
-        <button class="chip" data-act="ai-chip" data-q="帮我新建一节明天的化学课，学生有张皓然">新建课程</button>
+        <button class="chip" data-act="ai-chip" data-q="帮我新建一节明天的化学课，学生有${esc(S.students[0] ? S.students[0].name : '某学生')}">新建课程</button>
+        <button class="chip" data-act="ai-chip" data-q="出一份${esc(S.students[0] ? S.students[0].name : '某学生')}最近的课堂表现和学习要点报表">学生报表</button>
       </div>
       <div class="ai-input">
         <textarea id="aiInput" rows="2" placeholder="例如：帮我把九慧1班的学生导成表格"></textarea>
