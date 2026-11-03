@@ -1495,7 +1495,7 @@ function viewData() {
         .zip 是完整备份包（数据库 + 原图照片）。换手机时先装 App，再到这里「导入备份包」，选之前导出的 .zip 即可整库恢复。导入会覆盖本机数据。
       </div>` : ''}
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
-        导出为 .xlsx：表头加粗、冻结首行、可筛选。手机上请下载后用 WPS/Excel 打开（浏览器内预览可能显示空白）。JSON 用于整库恢复。
+        导出为 .xlsx：表头加粗、冻结首行、可筛选。手机上请下载后用 WPS/Excel 打开（浏览器内预览可能显示空白）。${hasNative() ? 'APK 里导出的文件保存在「下载/教育工作台」文件夹。' : 'JSON 用于整库恢复。'}
       </div>
     </div>
     <div class="card">
@@ -1689,7 +1689,27 @@ function xlsxBlob(rows, widths, sheetName) {
 
   return new Blob([zipStore(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
-function downloadBlob(name, blob) {
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => reject(fr.error || new Error('读取失败'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+async function downloadBlob(name, blob) {
+  if (hasNative() && typeof NATIVE.saveFile === 'function') {
+    try {
+      const b64 = await blobToBase64(blob);
+      const r = String(NATIVE.saveFile(name, blob.type || 'application/octet-stream', b64) || '');
+      if (r.indexOf('ERR:') === 0) return toast('保存失败：' + r.slice(4));
+      if (r.indexOf('SHARE:') === 0) return toast('文件已生成，请在弹出的分享面板选择保存位置');
+      return toast(`已保存到「${r}」：${name}`);
+    } catch (e) {
+      return toast('保存失败：' + (e.message || e));
+    }
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;

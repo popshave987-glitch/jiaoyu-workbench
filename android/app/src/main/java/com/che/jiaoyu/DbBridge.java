@@ -171,6 +171,42 @@ public class DbBridge {
         }
     }
 
+    /** 保存导出文件（xlsx/json/zip）：Android 10+ 存「下载/教育工作台」，旧版本走分享面板 */
+    @JavascriptInterface
+    public String saveFile(String name, String mime, String base64) {
+        try {
+            byte[] data = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues v = new android.content.ContentValues();
+                v.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name);
+                v.put(android.provider.MediaStore.Downloads.MIME_TYPE, mime);
+                v.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/教育工作台");
+                Uri uri = act.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                if (uri == null) return "ERR:无法创建文件";
+                try (java.io.OutputStream os = act.getContentResolver().openOutputStream(uri)) {
+                    if (os == null) return "ERR:无法写入";
+                    os.write(data);
+                }
+                final String msg = "已保存到 下载/教育工作台：" + name;
+                act.runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        android.widget.Toast.makeText(act, msg, android.widget.Toast.LENGTH_LONG).show();
+                    }
+                });
+                return "Download/教育工作台";
+            }
+            File dir = new File(act.getExternalFilesDir(null), "Download");
+            if (!dir.exists()) dir.mkdirs();
+            File f = new File(dir, name);
+            try (FileOutputStream fos = new FileOutputStream(f)) { fos.write(data); }
+            Uri u = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", f);
+            act.shareFile(u, name, mime, "保存文件");
+            return "SHARE:分享";
+        } catch (Throwable e) {
+            return "ERR:" + e.getMessage();
+        }
+    }
+
     @JavascriptInterface
     public String exportStudentPdf(String sid, String name) {
         try {
