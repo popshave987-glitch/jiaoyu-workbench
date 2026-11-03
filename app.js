@@ -588,6 +588,7 @@ function saveAiCfg(cfg) {
 function aiReady() { const c = aiCfg(); return !!(c.keys && c.keys.length && c.model); }
 
 const aiDetailCache = {};
+let aiPreferred = { key: '', model: '' };  // 上次成功的组合，下次优先
 
 async function aiChat(messages) {
   const cfg = aiCfg();
@@ -597,8 +598,11 @@ async function aiChat(messages) {
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
   const models = [cfg.model];
   if (cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
+  const keyOrder = cfg.keys.map((k, i) => i);
+  if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
+  if (aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
   const errs = [];
-  for (let i = 0; i < cfg.keys.length; i++) {
+  for (const i of keyOrder) {
     for (const model of models) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const ctrl = new AbortController();
@@ -618,7 +622,8 @@ async function aiChat(messages) {
           const data = await res.json();
           const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
           if (!text) { errs.push('Key' + (i + 1) + ':空'); break; }
-          return text;
+          aiPreferred = { key: cfg.keys[i], model };
+          return { text, kIdx: i, model };
         } catch (e) {
           clearTimeout(timer);
           if (e.name === 'AbortError' && attempt < 2) { await sleep(800); continue; }
@@ -627,7 +632,7 @@ async function aiChat(messages) {
       }
     }
   }
-  throw new Error(errs.slice(0, 2).join(' / ') || '未知错误');
+  throw new Error([...new Set(errs)].slice(0, 4).join(' / ') || '未知错误');
 }
 
 async function aiGeneratePoints() {
@@ -638,7 +643,7 @@ async function aiGeneratePoints() {
   const btn = document.querySelector('[data-act="ai-points"]');
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
   try {
-    const text = await aiChat([
+    const { text, kIdx } = await aiChat([
       { role: 'system', content: '你是初中/高中化学老师，只输出 JSON 数组，不要解释。' },
       { role: 'user', content: `请列出「${topic}」最常考的 6 个考点名称，每个 4–12 个字，简短、能直接当标签。只输出 JSON 字符串数组，例如 ["氧化还原本质","电子守恒配平"]。` },
     ]);
@@ -648,7 +653,7 @@ async function aiGeneratePoints() {
     if (!Array.isArray(arr) || !arr.length) throw new Error('返回为空');
     pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 16), on: false, busy: false }));
     renderPointChips();
-    toast('已生成 ' + pointBuf.length + ' 个考点，点选后自动写详细笔记');
+    toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (kIdx + 1) + '），点选后自动写详细笔记');
   } catch (e) {
     const fallback = CHEM_TOPICS[topic] || [];
     if (fallback.length) {
@@ -664,7 +669,7 @@ async function aiGeneratePoints() {
 
 async function aiExplainPoint(label) {
   if (aiDetailCache[label]) return aiDetailCache[label];
-  const text = await aiChat([
+  const { text } = await aiChat([
     { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
     { role: 'user', content: `针对考点「${label}」：\n1) key：核心知识，一句话 20–40 字；\n2) wrong：常见易错点，一句话 15–30 字。\n只输出 JSON：{"key":"…","wrong":"…"}` },
   ]);

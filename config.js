@@ -2,7 +2,10 @@
    内置 AI 配置（换 Key 只需要改这个文件）
    ============================================================ */
 window.APP_AI = {
-  keys: ['25f0090e1fe348918b0ba00f1ec936d9.TG17AWvTf89UKxzr'],
+  keys: [
+    '25f0090e1fe348918b0ba00f1ec936d9.TG17AWvTf89UKxzr',
+    '790583e1e4ac4d48b215b42613445770.ZyOH4BZd6uBscDmK'
+  ],
   model: 'glm-4.5-flash',
   endpoint: ''
 };
