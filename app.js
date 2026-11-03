@@ -982,6 +982,13 @@ function tplSheet(cls, subtitle, students, fbOf) {
   };
 }
 function fileSafe(x) { return String(x == null ? '' : x).replace(/[\\/:*?"<>|]/g, '').trim(); }
+function courseTitle(c) {
+  let t = String((c && c.name) || '课程');
+  const known = [...new Set(S.students.map(s => String(s.cls || '').trim()).filter(Boolean))]
+    .sort((x, y) => y.length - x.length);
+  known.forEach(k => { t = t.split(k).join(' '); });
+  return t.replace(/[\s\-_·]+/g, ' ').trim() || '课程';
+}
 
 function exportCourse(cid, onlySids) {
   const c = courseById(cid); if (!c) return;
@@ -991,7 +998,7 @@ function exportCourse(cid, onlySids) {
   const sheets = Object.keys(groups).sort().map(cls => tplSheet(
     cls, `上课日期：${fmtCn(c.date)}     授课教师：__________`, groups[cls], s => courseFb(cid, s.id)));
   if (!sheets.length) return toast('没有可导出的学生');
-  downloadBlob(`${fileSafe(c.date)}_${fileSafe(c.name)}_课后反馈表.xlsx`, xlsxSheets(sheets));
+  downloadBlob(`${fileSafe(c.date)}_${fileSafe(courseTitle(c))}_课后反馈表.xlsx`, xlsxSheets(sheets));
   toast(`已导出 ${sheets.length} 个班`);
 }
 
