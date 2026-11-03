@@ -157,6 +157,7 @@ const NAV = [
   { id: 'students', t: '学生管理', i: '👥' },
   { id: 'courses', t: '课程管理', i: '🎒' },
   { id: 'stats', t: '数据统计', i: '📈' },
+  { id: 'exports', t: '下载管理', i: '📥' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
   { id: 'assessments', t: '新生测评', i: '📊' },
   { id: 'plans', t: '学习规划', i: '🎯' },
@@ -279,7 +280,7 @@ function render() {
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
     assessments: viewAssessments,
-    plans: viewPlans, courses: viewCourses, stats: viewStats, data: viewData,
+    plans: viewPlans, courses: viewCourses, stats: viewStats, exports: viewExports, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
   document.getElementById('fab').style.display = (current === 'data' || current === 'home' || current === 'stats') ? 'none' : 'flex';
@@ -1360,93 +1361,228 @@ function lineChartHTML(points) {
     ${dots}${vals}${labels}</svg>`;
 }
 
+function studentStats(sid) {
+  const fbs = S.feedbacks.filter(f => f.sid === sid);
+  const ratingV = { '优秀': 3, '良好': 2, '待加强': 1 };
+  const avg = fbs.length ? fbs.reduce((n, f) => n + (ratingV[f.rating || '良好'] || 2), 0) / fbs.length : 0;
+  const myCourses = S.courses.filter(c => (c.sids || []).includes(sid) && c.date);
+  const lastCourse = myCourses.map(c => String(c.date)).sort().pop() || '';
+  const lastFb = fbs.map(f => String(f.date || '')).sort().pop() || '';
+  const photos = fbs.reduce((n, f) => n + ((f.photos || []).length), 0);
+  return { courses: myCourses.length, fbs: fbs.length, avg, lastCourse, lastFb, photos };
+}
+function daysSince(d) {
+  if (!d) return null;
+  const t = new Date(d + 'T00:00:00').getTime();
+  if (isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+function dictationRate(text) {
+  const m = String(text || '').match(/(\d+)\s*[\/／]\s*(\d+)/);
+  if (!m) return null;
+  const a = +m[1], b = +m[2];
+  if (!b) return null;
+  return Math.min(100, Math.round(a / b * 100));
+}
+
 function viewStats() {
   const month = today().slice(0, 7);
-  const active = S.students.filter(s => s.status !== '已结课').length;
+  const active = S.students.filter(st => st.status !== '已结课').length;
   const fbMonth = S.feedbacks.filter(f => String(f.date || '').startsWith(month)).length;
   const crMonth = S.courses.filter(c => String(c.date || '').startsWith(month)).length;
-  const photos = S.feedbacks.reduce((n, f) => n + ((f.photos || []).length), 0);
 
-  const clsMap = {};
-  S.students.forEach(s => { const k = classOf(s); clsMap[k] = (clsMap[k] || 0) + 1; });
-  const clsRows = Object.keys(clsMap).map(k => ({ k, v: clsMap[k] })).sort((a, b) => b.v - a.v);
+  // 待办：未写反馈的课
+  const pend = S.courses
+    .filter(c => c.date && c.date <= today() && (c.sids || []).length)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map(c => {
+      const miss = (c.sids || []).filter(sid => !courseFb(c.id, sid));
+      return { c, miss };
+    }).filter(x => x.miss.length).slice(0, 6);
 
-  // 近 8 周课次
-  const weeks = [];
-  let ws = weekStart(today());
-  for (let i = 7; i >= 0; i--) {
-    const d = new Date(ws + 'T00:00:00'); d.setDate(d.getDate() - i * 7);
-    weeks.push(d.toISOString().slice(0, 10));
-  }
-  const weekPts = weeks.map(w => ({
-    l: fmtMD(w), v: S.courses.filter(c => c.date && weekStart(c.date) === w).length,
-  }));
+  // 待办：久未上课（≥14 天）
+  const inactive = S.students.filter(st => st.status !== '已结课').map(st => {
+    const s2 = studentStats(st.id);
+    const d = daysSince(s2.lastCourse);
+    return { st, d, s2 };
+  }).filter(x => x.d === null || x.d >= 14).sort((a, b) => (b.d === null ? 999 : b.d) - (a.d === null ? 999 : a.d)).slice(0, 8);
 
-  // 最近 10 节课反馈完成率
-  const recent = S.courses.slice().filter(c => (c.sids || []).length)
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 10).reverse();
-  const donePts = recent.map(c => {
-    const done = (c.sids || []).filter(sid => courseFb(c.id, sid)).length;
-    return { l: String(c.date || '').slice(5), v: Math.round(done / c.sids.length * 100) };
-  });
+  // 待办：久未沟通（≥30 天）
+  const noContact = S.students.map(st => {
+    const cs = S.contacts.filter(c => c.sid === st.id).map(c => String(c.date || '')).sort().pop() || '';
+    return { st, d: daysSince(cs), last: cs };
+  }).filter(x => x.d === null || x.d >= 30).sort((a, b) => (b.d === null ? 999 : b.d) - (a.d === null ? 999 : a.d)).slice(0, 6);
 
-  // 科目分布
-  const subMap = {};
-  S.courses.forEach(c => { const k = c.subject || '化学'; subMap[k] = (subMap[k] || 0) + 1; });
-  const subRows = Object.keys(subMap).map(k => ({ k, v: subMap[k] })).sort((a, b) => b.v - a.v);
+  // 学生明细
+  const rows = S.students.map(st => ({ st, s2: studentStats(st.id) }))
+    .sort((a, b) => b.s2.courses - a.s2.courses || b.s2.fbs - a.s2.fbs);
 
-  // 单个学生进步趋势
-  const withFb = S.students.filter(s => S.feedbacks.some(f => f.sid === s.id));
-  if (!statSid || !S.students.some(s => s.id === statSid)) statSid = withFb.length ? withFb[0].id : '';
+  // 进步趋势 + 默写正确率
+  const withFb = S.students.filter(st => S.feedbacks.some(f => f.sid === st.id));
+  if (!statSid || !S.students.some(st => st.id === statSid)) statSid = withFb.length ? withFb[0].id : '';
   const ratingV = { '优秀': 3, '良好': 2, '待加强': 1 };
   const myFb = S.feedbacks.filter(f => f.sid === statSid)
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).slice(-10);
   const progPts = myFb.map(f => ({ l: String(f.date || '').slice(5), v: ratingV[f.rating || '良好'] || 2 }));
+  const dictPts = myFb.map(f => ({ l: String(f.date || '').slice(5), v: dictationRate(f.dictation) })).filter(p => p.v !== null);
+
+  // 班级人数
+  const clsMap = {};
+  S.students.forEach(st => { const k = classOf(st); clsMap[k] = (clsMap[k] || 0) + 1; });
+  const clsRows = Object.keys(clsMap).map(k => ({ k, v: clsMap[k] })).sort((a, b) => b.v - a.v);
+
+  const todoItem = (title, tone, body, count) => `<div class="todo">
+      <div class="todo-h"><b>${title}</b><span class="tag ${tone}">${count}</span></div>
+      ${body}
+    </div>`;
+
+  const pendBody = pend.length ? pend.map(x => `<div class="todo-line">
+      <span>${esc(x.c.date)} · ${esc(courseTitle(x.c))}</span>
+      <span class="meta">缺 ${x.miss.length} 人：${esc(x.miss.map(sid => studentName(sid)).join('、'))}</span>
+    </div>`).join('') : '<div class="meta">全部课程反馈已补齐 👍</div>';
+
+  const inactBody = inactive.length ? inactive.map(x => `<div class="todo-line">
+      <span>${esc(x.st.name)} <i class="meta">${esc(classOf(x.st))}</i></span>
+      <span class="meta">${x.d === null ? '还没上过课' : '已 ' + x.d + ' 天没上课'}</span>
+    </div>`).join('') : '<div class="meta">所有在读学生近期都有课</div>';
+
+  const contactBody = noContact.length ? noContact.map(x => `<div class="todo-line">
+      <span>${esc(x.st.name)} <i class="meta">${esc(classOf(x.st))}</i></span>
+      <span class="meta">${x.d === null ? '从未沟通' : x.d + ' 天没沟通'}</span>
+    </div>`).join('') : '<div class="meta">家长沟通都还算及时</div>';
 
   return `
+    <div class="beta-bar">🧪 <b>测试功能</b>：样本还少，指标口径会随数据量调整；数据多了之后会加更多实用统计（趋势对比、薄弱点、续费预警等）。</div>
+
     <div class="stat-grid">
-      <div class="stat-card"><b>${S.students.length}</b><span>学生总数</span><i>在读 ${active}</i></div>
-      <div class="stat-card"><b>${S.courses.length}</b><span>累计课程</span><i>本月 ${crMonth} 节</i></div>
-      <div class="stat-card"><b>${S.feedbacks.length}</b><span>反馈记录</span><i>本月 ${fbMonth} 条</i></div>
-      <div class="stat-card"><b>${photos}</b><span>错题照片</span><i>原图存储</i></div>
+      <div class="stat-card"><b>${active}</b><span>在读学生</span><i>共 ${S.students.length} 人</i></div>
+      <div class="stat-card"><b>${crMonth}</b><span>本月课次</span><i>累计 ${S.courses.length} 节</i></div>
+      <div class="stat-card"><b>${fbMonth}</b><span>本月反馈</span><i>累计 ${S.feedbacks.length} 条</i></div>
+      <div class="stat-card"><b>${pend.length}</b><span>待补反馈</span><i>最近未齐的课</i></div>
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">近 8 周上课次数</h3>
-      <div class="meta">按周统计，能看出课时密度变化</div>
-      ${lineChartHTML(weekPts)}
+      <h3 style="margin-top:0">要做的事</h3>
+      ${todoItem('未写反馈', 'amber', pendBody, pend.length + ' 节')}
+      ${todoItem('久未上课', 'gray', inactBody, inactive.length + ' 人')}
+      ${todoItem('久未联系家长', 'gray', contactBody, noContact.length + ' 人')}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">学生明细</h3>
+      <div class="meta">按上课次数排序，点学生可查看趋势</div>
+      <div class="mini-table">
+        <div class="mt-head"><span>学生</span><span>课次</span><span>反馈</span><span>均分</span><span>最近上课</span></div>
+        ${rows.map(r => `<div class="mt-row">
+          <span>${esc(r.st.name)}<i>${esc(classOf(r.st))}</i></span>
+          <span>${r.s2.courses}</span>
+          <span>${r.s2.fbs}</span>
+          <span>${r.s2.avg ? r.s2.avg.toFixed(1) : '—'}</span>
+          <span>${r.s2.lastCourse ? String(r.s2.lastCourse).slice(5) : '—'}</span>
+        </div>`).join('') || '<div class="empty">还没有学生</div>'}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">单个学生趋势</h3>
+      <div class="field" style="margin-bottom:8px">
+        <select id="statSid">
+          ${withFb.map(st => `<option value="${st.id}" ${st.id === statSid ? 'selected' : ''}>${esc(st.name)} · ${esc(classOf(st))}</option>`).join('') || '<option value="">还没有反馈</option>'}
+        </select>
+      </div>
+      <div class="meta">评价趋势（3=优秀 2=良好 1=待加强）</div>
+      ${lineChartHTML(progPts)}
+      <div class="meta" style="margin-top:10px">默写正确率（从「默写检查」里解析 8/10 → 80%）</div>
+      ${dictPts.length ? lineChartHTML(dictPts) : '<div class="empty" style="padding:8px 0">还没有可解析的默写分数</div>'}
     </div>
 
     <div class="card">
       <h3 style="margin-top:0">班级人数分布</h3>
       ${barsHTML(clsRows, ' 人')}
     </div>
+  `;
+}
 
-    <div class="card">
-      <h3 style="margin-top:0">最近 10 节课反馈完成率</h3>
-      <div class="meta">每节课已写反馈人数 ÷ 选课人数（%）</div>
-      ${lineChartHTML(donePts)}
-    </div>
+/* 导出成功横幅 */
+let dlBannerTimer = null;
+let expFocus = '';
+function onAnyDocClick(e) {
+  if (e.target && e.target.closest && e.target.closest('#dlBanner')) return;
+  dismissDownloadBanner();
+}
+function dismissDownloadBanner() {
+  const b = document.getElementById('dlBanner');
+  if (b) b.remove();
+  if (dlBannerTimer) { clearTimeout(dlBannerTimer); dlBannerTimer = null; }
+  document.removeEventListener('click', onAnyDocClick, true);
+}
+function focusExport(id) {
+  const el = document.querySelector(`[data-eid="${id}"]`);
+  if (!el) return;
+  if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('focus');
+  setTimeout(() => el.classList.remove('focus'), 1800);
+}
+function showDownloadBanner(name, id) {
+  dismissDownloadBanner();
+  const b = document.createElement('div');
+  b.id = 'dlBanner';
+  b.innerHTML = `<span class="dl-ic">✅</span><span class="dl-txt"><b>下载成功</b><i>${esc(name)}</i></span><span class="dl-go">查看 ›</span>`;
+  document.body.appendChild(b);
+  requestAnimationFrame(() => b.classList.add('show'));
+  dlBannerTimer = setTimeout(dismissDownloadBanner, 5000);
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismissDownloadBanner();
+    if (!id) return;
+    expFocus = id;
+    if (location.hash === '#/exports') render();
+    else location.hash = '#/exports';
+    setTimeout(() => focusExport(id), 180);
+  });
+  setTimeout(() => document.addEventListener('click', onAnyDocClick, true), 0);
+}
 
-    <div class="card">
-      <h3 style="margin-top:0">学生进步趋势</h3>
-      <div class="field" style="margin-bottom:8px">
-        <select id="statSid">
-          ${withFb.map(s => `<option value="${s.id}" ${s.id === statSid ? 'selected' : ''}>${esc(s.name)} · ${esc(classOf(s))}</option>`).join('') || '<option value="">还没有反馈</option>'}
-        </select>
+/* ---------------- 下载管理 ---------------- */
+let expQ = '';
+function fmtSize(n) {
+  n = Number(n) || 0;
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+function exportIcon(mime, name) {
+  const m = String(mime || ''), n = String(name || '');
+  if (/zip/i.test(m) || /\.zip$/i.test(n)) return '🗜️';
+  if (/pdf/i.test(m) || /\.pdf$/i.test(n)) return '📄';
+  if (/json/i.test(m) || /\.json$/i.test(n)) return '🧾';
+  return '📊';
+}
+function viewExports() {
+  if (!hasNative() || typeof NATIVE.listExports !== 'function') {
+    return `<div class="notice">下载管理仅在安卓 App 中可用。</div>`;
+  }
+  let rows = [];
+  try { rows = JSON.parse(NATIVE.listExports() || '[]'); } catch (_) { rows = []; }
+  const ts = (r) => {
+    const m = String(r.id || '').match(/e_(\d+)/);
+    return m ? +m[1] : 0;
+  };
+  rows.sort((a, b) => ts(b) - ts(a) || String(b.created || '').localeCompare(String(a.created || '')));
+  const q = expQ.trim().toLowerCase();
+  if (q) rows = rows.filter(r => String(r.name || '').toLowerCase().includes(q) || String(r.created || '').includes(q));
+  return `
+    <div class="searchbar"><input id="expQ" placeholder="搜文件名或日期，如 反馈表、2026-11-03" value="${esc(expQ)}"></div>
+    <div class="section-title"><h2>共 ${rows.length} 个文件</h2><div class="meta">最新导出排在最上面 · 存于「下载/教育工作台」</div></div>
+    ${rows.map(r => `<div class="card" data-eid="${r.id}">
+      <div class="row"><strong>${exportIcon(r.mime, r.name)} ${esc(r.name)}</strong><span class="spacer"></span><span class="meta">${esc(r.created || '')}</span></div>
+      <div class="meta">${fmtSize(r.size)}</div>
+      <div class="btns">
+        <button class="btn sm primary" data-act="exp-open" data-id="${r.id}">直接打开</button>
+        <button class="btn sm" data-act="exp-loc" data-id="${r.id}">所在位置</button>
+        <button class="btn sm danger" data-act="exp-del" data-id="${r.id}">删除</button>
       </div>
-      <div class="meta">纵轴：3=优秀，2=良好，1=待加强（取每次反馈的评价）</div>
-      ${lineChartHTML(progPts)}
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0">课程科目分布</h3>
-      ${barsHTML(subRows, ' 节')}
-    </div>
-
-    <div class="tip" style="font-size:12px;color:#64748B;padding:0 4px">
-      统计直接来自本机 SQLite 数据，无需联网；数据越多图表越准。
-    </div>
+    </div>`).join('') || '<div class="empty">还没有导出记录，去课程里导出反馈表试试</div>'}
   `;
 }
 
@@ -1705,7 +1841,9 @@ async function downloadBlob(name, blob) {
       const r = String(NATIVE.saveFile(name, blob.type || 'application/octet-stream', b64) || '');
       if (r.indexOf('ERR:') === 0) return toast('保存失败：' + r.slice(4));
       if (r.indexOf('SHARE:') === 0) return toast('文件已生成，请在弹出的分享面板选择保存位置');
-      return toast(`已保存到「${r}」：${name}`);
+      const parts = r.split('|');
+      if (parts[0] === 'OK') return showDownloadBanner(parts[2] || name, parts[1] || '');
+      return toast('已保存到「' + r + '」：' + name);
     } catch (e) {
       return toast('保存失败：' + (e.message || e));
     }
@@ -1930,6 +2068,17 @@ function bind() {
   });
   document.addEventListener('scroll', hideCombo, true);
   window.addEventListener('resize', hideCombo);
+  document.addEventListener('input', (e) => {
+    if (e.target.id === 'expQ') {
+      expQ = e.target.value;
+      render();
+      setTimeout(() => {
+        const el = document.getElementById('expQ');
+        if (el) { el.focus(); const v = el.value; el.setSelectionRange(v.length, v.length); }
+      }, 0);
+    }
+  });
+
   document.addEventListener('change', async (e) => {
     if (e.target.id === 'statSid') { statSid = e.target.value; render(); return; }
     const id = e.target.id;
@@ -2006,6 +2155,29 @@ function bind() {
     }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
+    if (act === 'exp-open') {
+      if (!hasNative()) return;
+      try {
+        const r = String(NATIVE.openExport(id) || '');
+        if (r.indexOf('ERR:') === 0) toast('打开失败：' + r.slice(4));
+      } catch (e) { toast('打开失败'); }
+      return;
+    }
+    if (act === 'exp-loc') {
+      if (!hasNative()) return;
+      try { NATIVE.openExportLocation(id); } catch (e) { toast('无法打开文件夹'); }
+      return;
+    }
+    if (act === 'exp-del') {
+      if (!hasNative()) return;
+      if (!confirm('删除这个文件？此操作不可撤销。')) return;
+      if (!confirm('再确认一次：将从手机「下载/教育工作台」中彻底删除。')) return;
+      try {
+        const r = String(NATIVE.deleteExport(id) || '');
+        if (r === 'OK') { toast('已删除'); render(); } else toast('删除失败：' + r);
+      } catch (e) { toast('删除失败'); }
+      return;
+    }
     if (act === 'student-pdf') {
       if (!hasNative() || typeof NATIVE.exportStudentPdf !== 'function') {
         if (exportPdfWeb(id)) toast('已打开打印页，选择「另存为 PDF」即可');
@@ -2014,6 +2186,8 @@ function bind() {
       try {
         const r = String(NATIVE.exportStudentPdf(id, studentName(id)) || '');
         if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
+        const parts = r.split('|');
+        if (parts[0] === 'OK') return showDownloadBanner(parts[2] || '反馈 PDF', parts[1] || '');
         return toast('PDF 已生成，选择「保存到文件」或发微信');
       } catch (e) { return toast('导出失败：' + (e.message || e)); }
     }
@@ -2137,7 +2311,9 @@ function bind() {
       try {
         const r = String(NATIVE.exportDb() || '');
         if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
-        return toast('已生成数据库文件，在分享面板选「保存到文件」或发到微信');
+        const parts = r.split('|');
+        if (parts[0] === 'OK') return showDownloadBanner(parts[2] || '备份包', parts[1] || '');
+        return toast('已生成备份包，在分享面板选「保存到文件」或发到微信');
       } catch (e) { return toast('导出失败：' + (e.message || e)); }
     }
     if (act === 'import-db') {

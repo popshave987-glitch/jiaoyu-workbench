@@ -1,9 +1,14 @@
 package com.che.jiaoyu;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.database.Cursor;
+import android.content.Intent;
 import android.database.sqlite.SQLiteDatabase;
+import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.net.Uri;
 import android.webkit.JavascriptInterface;
 
@@ -171,37 +176,146 @@ public class DbBridge {
         }
     }
 
-    /** 保存导出文件（xlsx/json/zip）：Android 10+ 存「下载/教育工作台」，旧版本走分享面板 */
+    /** 保存导出文件并记录历史；Android 10+ 存「下载/教育工作台」，旧系统走分享面板 */
     @JavascriptInterface
     public String saveFile(String name, String mime, String base64) {
         try {
             byte[] data = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                android.content.ContentValues v = new android.content.ContentValues();
-                v.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name);
-                v.put(android.provider.MediaStore.Downloads.MIME_TYPE, mime);
-                v.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/教育工作台");
-                Uri uri = act.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
-                if (uri == null) return "ERR:无法创建文件";
-                try (java.io.OutputStream os = act.getContentResolver().openOutputStream(uri)) {
-                    if (os == null) return "ERR:无法写入";
-                    os.write(data);
-                }
-                final String msg = "已保存到 下载/教育工作台：" + name;
-                act.runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        android.widget.Toast.makeText(act, msg, android.widget.Toast.LENGTH_LONG).show();
-                    }
-                });
-                return "Download/教育工作台";
+            Uri uri = writeToDownloads(name, mime, data);
+            String id = recordExport(name, mime, data.length, uri, uri != null && uri.getScheme().equals("file") ? uri.getPath() : "");
+            if (android.os.Build.VERSION.SDK_INT < 29) act.shareFile(uriFor(uri), name, mime, "保存文件");
+            return "OK|" + id + "|" + name;
+        } catch (Throwable e) {
+            return "ERR:" + e.getMessage();
+        }
+    }
+
+    private Uri uriFor(Uri uri) throws Exception {
+        if (uri.getScheme().equals("file")) return FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", new File(uri.getPath()));
+        return uri;
+    }
+
+    private Uri writeToDownloads(String name, String mime, byte[] data) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.content.ContentValues v = new android.content.ContentValues();
+            v.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            v.put(MediaStore.Downloads.MIME_TYPE, mime);
+            v.put(MediaStore.Downloads.RELATIVE_PATH, "Download/教育工作台");
+            Uri uri = act.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new Exception("无法创建文件");
+            try (java.io.OutputStream os = act.getContentResolver().openOutputStream(uri)) {
+                if (os == null) throw new Exception("无法写入");
+                os.write(data);
             }
-            File dir = new File(act.getExternalFilesDir(null), "Download");
-            if (!dir.exists()) dir.mkdirs();
-            File f = new File(dir, name);
-            try (FileOutputStream fos = new FileOutputStream(f)) { fos.write(data); }
-            Uri u = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", f);
-            act.shareFile(u, name, mime, "保存文件");
-            return "SHARE:分享";
+            return uri;
+        }
+        File dir = new File(act.getExternalFilesDir(null), "Download");
+        if (!dir.exists()) dir.mkdirs();
+        File f = new File(dir, name);
+        try (FileOutputStream fos = new FileOutputStream(f)) { fos.write(data); }
+        return Uri.fromFile(f);
+    }
+
+    private String recordExport(String name, String mime, long size, Uri uri, String path) {
+        try {
+            android.content.ContentValues v = new android.content.ContentValues();
+            String id = "e_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 1000);
+            v.put("id", id);
+            v.put("name", name);
+            v.put("mime", mime);
+            v.put("size", size);
+            v.put("created", new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(new Date()));
+            v.put("uri", uri != null ? uri.toString() : "");
+            v.put("path", path == null ? "" : path);
+            db().insertWithOnConflict("exports", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+            return id;
+        } catch (Throwable ignored) { return ""; }
+    }
+
+    private void toastUi(final String msg) {
+        act.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                android.widget.Toast.makeText(act, msg, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public String listExports() {
+        JSONArray arr = new JSONArray();
+        Cursor c = db().rawQuery("SELECT id,name,mime,size,created,uri,path FROM exports ORDER BY id DESC", null);
+        try {
+            while (c.moveToNext()) {
+                JSONObject o = new JSONObject();
+                try {
+                    o.put("id", c.getString(0));
+                    o.put("name", c.getString(1));
+                    o.put("mime", c.getString(2));
+                    o.put("size", c.getLong(3));
+                    o.put("created", c.getString(4));
+                    o.put("uri", c.getString(5));
+                    o.put("path", c.getString(6));
+                } catch (Exception ignored) { }
+                arr.put(o);
+            }
+        } finally { c.close(); }
+        return arr.toString();
+    }
+
+    private Cursor findExport(String id) {
+        return db().rawQuery("SELECT uri,mime,path,name FROM exports WHERE id=?", new String[]{id});
+    }
+
+    @JavascriptInterface
+    public String openExport(String id) {
+        try (Cursor c = findExport(id)) {
+            if (!c.moveToFirst()) return "ERR:记录不存在";
+            String uriStr = c.getString(0), mime = c.getString(1), path = c.getString(2);
+            Uri uri = uriStr.isEmpty() ? FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", new File(path)) : Uri.parse(uriStr);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uriFor(uri), mime);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            return "OK";
+        } catch (Throwable e) {
+            return "ERR:没有可打开该文件的应用";
+        }
+    }
+
+    @JavascriptInterface
+    public String openExportLocation(String id) {
+        try {
+            Uri dir = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/教育工作台");
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(dir, "vnd.android.document/directory");
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            act.startActivity(i);
+            return "OK";
+        } catch (Throwable e) {
+            try {
+                ClipboardManager cm = (ClipboardManager) act.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(ClipData.newPlainText("路径", "下载/教育工作台"));
+            } catch (Throwable ignored) { }
+            toastUi("文件在「下载/教育工作台」文件夹");
+            return "CLIP";
+        }
+    }
+
+    @JavascriptInterface
+    public String deleteExport(String id) {
+        try {
+            String uriStr = "", path = "";
+            try (Cursor c = findExport(id)) {
+                if (c.moveToFirst()) { uriStr = c.getString(0); path = c.getString(2); }
+            }
+            if (!uriStr.isEmpty() && !uriStr.startsWith("file:")) {
+                try { act.getContentResolver().delete(Uri.parse(uriStr), null, null); } catch (Throwable ignored) { }
+            }
+            if (!path.isEmpty()) {
+                try { new File(path).delete(); } catch (Throwable ignored) { }
+            }
+            db().delete("exports", "id=?", new String[]{id});
+            return "OK";
         } catch (Throwable e) {
             return "ERR:" + e.getMessage();
         }
@@ -212,9 +326,15 @@ public class DbBridge {
         try {
             closeDb();
             File pdf = PdfExporter.build(act.getApplicationContext(), dbFile(), sid, name);
-            Uri uri = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", pdf);
-            act.shareFile(uri, pdf.getName(), "application/pdf", "导出 PDF");
-            return pdf.getAbsolutePath();
+            byte[] bytes = new byte[(int) pdf.length()];
+            try (FileInputStream fis = new FileInputStream(pdf)) {
+                int off = 0, n;
+                while ((n = fis.read(bytes, off, bytes.length - off)) > 0) off += n;
+            }
+            Uri uri = writeToDownloads(pdf.getName(), "application/pdf", bytes);
+            String id = recordExport(pdf.getName(), "application/pdf", bytes.length, uri, uri.getScheme().equals("file") ? uri.getPath() : "");
+            act.shareFile(uriFor(uri), pdf.getName(), "application/pdf", "导出 PDF");
+            return "OK|" + id + "|" + pdf.getName();
         } catch (Throwable e) {
             return "ERR:" + e.getMessage();
         }
@@ -256,11 +376,17 @@ public class DbBridge {
             closeDb();
             if (!dbFile().exists()) return "ERR:数据库还不存在";
             String stamp = new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.CHINA).format(new Date());
-            File out = new File(act.getCacheDir(), "教育活动台_" + stamp + ".zip");
+            File out = new File(act.getCacheDir(), "教育工作台_" + stamp + ".zip");
             buildBackupZip(out);
-            Uri uri = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", out);
-            act.shareDbFile(uri, out.getName());
-            return out.getAbsolutePath();
+            byte[] bytes = new byte[(int) out.length()];
+            try (FileInputStream fis = new FileInputStream(out)) {
+                int off = 0, n;
+                while ((n = fis.read(bytes, off, bytes.length - off)) > 0) off += n;
+            }
+            Uri uri = writeToDownloads(out.getName(), "application/zip", bytes);
+            String id = recordExport(out.getName(), "application/zip", bytes.length, uri, uri.getScheme().equals("file") ? uri.getPath() : "");
+            act.shareFile(uriFor(uri), out.getName(), "application/zip", "导出备份包");
+            return "OK|" + id + "|" + out.getName();
         } catch (Exception e) {
             return "ERR:" + e.getMessage();
         }

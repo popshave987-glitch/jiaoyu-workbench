@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 public class DbHelper extends SQLiteOpenHelper {
 
     public static final String NAME = "jiaoyu.db";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
 
     public DbHelper(Context c) {
         super(c, NAME, null, VERSION);
@@ -33,9 +33,18 @@ public class DbHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_feedbacks_course ON feedbacks(course_id)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_plans_sid ON plans(sid)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_courses_date ON courses(date)");
+
+        createExports(db);
+    }
+
+    private static void createExports(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS exports(id TEXT PRIMARY KEY,name TEXT,mime TEXT,size INTEGER,created TEXT,uri TEXT,path TEXT)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_exports_created ON exports(created)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_exports_name ON exports(name)");
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion < 2) createExports(db);
     }
 }

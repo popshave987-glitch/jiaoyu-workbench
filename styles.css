@@ -325,3 +325,31 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .bar-track i{display:block;height:100%;background:linear-gradient(90deg,#0E9F97,#17C3A2);border-radius:6px}
 .bar-val{width:44px;text-align:right;font-size:11.5px;color:#64748B;flex:0 0 auto}
 .chart{width:100%;height:auto;display:block;margin-top:6px}
+
+/* 统计页：Beta、待办、明细表 */
+.beta-bar{background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;border-radius:12px;padding:9px 12px;font-size:12px;line-height:1.6;margin-bottom:12px}
+.beta-bar b{color:#C2410C}
+.todo{border-top:1px dashed #E2E8F0;padding:9px 0 4px}
+.todo:first-of-type{border-top:0}
+.todo-h{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.todo-h b{font-size:13px;color:#0F172A}
+.todo-line{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0;color:#334155}
+.todo-line .meta{color:#94A3B8;text-align:right;flex:0 0 auto;max-width:52%}
+.mini-table{margin-top:8px;font-size:12.5px}
+.mt-head,.mt-row{display:grid;grid-template-columns:1.5fr .6fr .6fr .6fr .8fr;gap:6px;padding:6px 2px;align-items:center}
+.mt-head{color:#94A3B8;font-size:11.5px;border-bottom:1px solid #E2E8F0}
+.mt-row{border-bottom:1px solid #F1F5F9}
+.mt-row span:nth-child(n+2){text-align:right;color:#475569}
+.mt-row i{display:inline-block;font-style:normal;font-size:10.5px;color:#94A3B8;margin-left:4px}
+
+/* 导出成功横幅 */
+#dlBanner{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);display:flex;align-items:center;gap:10px;
+  background:#0F172A;color:#fff;padding:10px 14px;border-radius:14px;max-width:92vw;z-index:99;opacity:0;
+  transition:transform .18s,opacity .18s;box-shadow:0 8px 24px rgba(15,23,42,.28);cursor:pointer}
+#dlBanner.show{transform:translate(-50%,0);opacity:1}
+#dlBanner .dl-ic{font-size:16px}
+#dlBanner .dl-txt{display:flex;flex-direction:column;min-width:0}
+#dlBanner .dl-txt b{font-size:13px}
+#dlBanner .dl-txt i{font-style:normal;font-size:11.5px;color:#CBD5E1;max-width:58vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#dlBanner .dl-go{font-size:12px;color:#7DD3FC;flex:0 0 auto}
+.card.focus{border-color:#028090;box-shadow:0 0 0 2px rgba(2,128,144,.16)}
