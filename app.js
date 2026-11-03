@@ -128,7 +128,6 @@ const NAV = [
   { id: 'courses', t: '课程管理', i: '🎒' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
   { id: 'assessments', t: '新生测评', i: '📊' },
-  { id: 'feedbacks', t: '上课反馈', i: '📝' },
   { id: 'plans', t: '学习规划', i: '🎯' },
   { id: 'data', t: '数据与备份', i: '🗂️' },
 ];
@@ -248,7 +247,7 @@ function render() {
   renderNav();
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
-    assessments: viewAssessments, feedbacks: viewFeedbacks,
+    assessments: viewAssessments,
     plans: viewPlans, courses: viewCourses, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
@@ -274,7 +273,6 @@ function viewHome() {
       <button data-act="quick" data-q="student">＋ 添加学生</button>
       <button data-act="quick" data-q="contact">＋ 记沟通</button>
       <button data-act="quick" data-q="assessment">＋ 新测评</button>
-      <button data-act="quick" data-q="feedback">＋ 写反馈</button>
     </div>
     <div class="section-title"><h2>最近添加的学生</h2><a href="#/students" style="font-size:12px;color:#028090;text-decoration:none">全部 →</a></div>
     ${recent}
@@ -306,7 +304,6 @@ function studentCard(s, compact) {
     ${compact ? '' : `<div class="btns">
       <button class="btn sm" data-act="add-contact" data-sid="${s.id}">记沟通</button>
       <button class="btn sm" data-act="add-assessment" data-sid="${s.id}">做测评</button>
-      <button class="btn sm" data-act="add-feedback" data-sid="${s.id}">写反馈</button>
       <button class="btn sm danger" data-act="del-student" data-id="${s.id}">删除</button>
     </div>
     <div class="meta" style="margin-top:8px">沟通 ${cnt.c} 条 · 测评 ${cnt.a} 份 · 反馈 ${cnt.f} 条</div>`}
@@ -475,7 +472,6 @@ function assessText(a) {
 }
 
 /* ---------------- 反馈 ---------------- */
-let fbSid = '';
 let photoBuf = [];   // 当前弹窗里的错题照片（压缩后的 dataURL）
 
 function compressImage(file, max, quality) {
@@ -514,47 +510,6 @@ function openPhoto(src) {
      <div class="modal-actions"><button class="btn" data-act="modal-cancel">关闭</button></div>`;
   document.getElementById('modalWrap').classList.add('show');
 }
-function viewFeedbacks() {
-  let list = S.feedbacks.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  if (fbSid) list = list.filter(f => f.sid === fbSid);
-  return `
-    <div class="notice blue" style="margin-bottom:12px">上课反馈：填完点「复制反馈」发文字；有错题照片时，点「分享(含照片)」可连同图片一起发。</div>
-    <div class="searchbar">
-      <select id="fbSid"><option value="">全部学生</option>
-        ${S.students.map(s => `<option value="${s.id}" ${s.id === fbSid ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="section-title"><h2>共 ${list.length} 条</h2>${pageActions('feedbacks','add-feedback','＋ 写反馈')}</div>
-    ${list.map(f => {
-    const photos = f.photos || [];
-    return `<div class="card">
-      <div class="row"><strong>${esc(studentName(f.sid))}</strong>
-        <span class="tag">${esc(f.subject || '化学')}</span>
-        <span class="tag ${f.rating === '待加强' ? 'amber' : f.rating === '优秀' ? '' : 'gray'}">${esc(f.rating || '良好')}</span>
-        <span class="spacer"></span><span class="meta">${esc(f.date || '')}</span></div>
-      ${(f.topic || (f.points && f.points.length)) ? `<div class="meta" style="margin-top:6px">考点：<b>${esc(f.topic || '')}</b></div>
-      <div class="chips" style="margin-top:6px">${(f.points || []).map(p => `<span class="chip lv${p.lv}">${esc(p.t)} · ${POINT_LV[p.lv]}</span>`).join('')}</div>` : ''}
-      <div style="margin-top:8px;font-size:13px;line-height:1.75">
-        ${(f.notes || f.content) ? `<div><b style="color:#028090">课堂笔记：</b>${esc(f.notes || f.content)}</div>` : ''}
-        ${f.performance ? `<div><b style="color:#028090">课堂表现：</b>${esc(f.performance)}</div>` : ''}
-        ${(f.homework || f.task) ? `<div><b style="color:#028090">课后作业：</b>${esc(f.homework || f.task)}</div>` : ''}
-        ${(f.progress || f.good) ? `<div><b style="color:#0B6B5B">进步点：</b>${esc(f.progress || f.good)}</div>` : ''}
-        ${f.weak ? `<div><b style="color:#A3312B">需要加强点：</b>${esc(f.weak)}</div>` : ''}
-        ${f.dictation ? `<div><b style="color:#8B5E00">默写检查情况：</b>${esc(f.dictation)}</div>` : ''}
-      </div>
-      ${photos.length ? `<div class="photos">${photos.map((p, i) => `<div class="photo"><img src="${p}" alt="错题 ${i + 1}"><button data-act="view-photo" data-id="${f.id}" data-idx="${i}">⤢</button></div>`).join('')}</div>` : ''}
-      <div class="btns">
-        <button class="btn sm" data-act="copy-feedback" data-id="${f.id}">复制反馈</button>
-        ${photos.length ? `<button class="btn sm primary" data-act="share-feedback" data-id="${f.id}">分享(含照片)</button>
-        <button class="btn sm" data-act="dl-photos" data-id="${f.id}">下载照片</button>` : ''}
-        <button class="btn sm" data-act="edit-feedback" data-id="${f.id}">编辑</button>
-        <button class="btn sm danger" data-act="del-feedback" data-id="${f.id}">删除</button>
-      </div>
-    </div>`;
-  }).join('') || `<div class="empty">还没有上课反馈</div>`}
-  `;
-}
-
 /* ---------------- 内置化学考点库（离线可用，不花钱） ---------------- */
 const CHEM_TOPICS = {
   '化学用语': ['元素符号与名称', '化学式书写', '化合价规则', '离子符号', '化学方程式配平'],
@@ -1188,7 +1143,6 @@ function viewData() {
         <button class="btn" data-act="xlsx-students">学生</button>
         <button class="btn" data-act="xlsx-contacts">家长沟通</button>
         <button class="btn" data-act="xlsx-assessments">新生测评</button>
-        <button class="btn" data-act="xlsx-feedbacks">上课反馈</button>
         <button class="btn" data-act="xlsx-plans">学习规划</button>
       </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
@@ -1612,7 +1566,6 @@ function bind() {
     const id = e.target.id;
     if (id === 'conSid') { conSid = e.target.value; render(); }
     if (id === 'assSid') { assSid = e.target.value; render(); }
-    if (id === 'fbSid') { fbSid = e.target.value; render(); }
     if (id === 'plSid') { plSid = e.target.value; render(); }
     if (id === 'expSid') { expSid = e.target.value; }
     if (e.target.matches('[data-act="toggle-task"]')) {
@@ -1720,7 +1673,7 @@ function bind() {
 
     if (act === 'export-page') {
       const mod = t.dataset.mod;
-      const sid = ({ contacts: conSid, assessments: assSid, feedbacks: fbSid, plans: plSid, students: '' })[mod] || '';
+      const sid = ({ contacts: conSid, assessments: assSid, plans: plSid, students: '' })[mod] || '';
       if (mod === 'students') return exportRoster();
       exportExcel(mod, sid);
       return;
