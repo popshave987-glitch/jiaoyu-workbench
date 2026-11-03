@@ -590,7 +590,8 @@ function aiReady() { const c = aiCfg(); return !!(c.keys && c.keys.length && c.m
 const aiDetailCache = {};
 let aiPreferred = { key: '', model: '' };  // 上次成功的组合，下次优先
 
-async function aiChat(messages) {
+async function aiChat(messages, opt) {
+  opt = opt || {};
   const cfg = aiCfg();
   if (!cfg.keys.length || !cfg.model) throw new Error('未配置 API Key');
   const endpoint = cfg.endpoint || 'https://api.z.ai/api/paas/v4/chat/completions';
@@ -611,7 +612,13 @@ async function aiChat(messages) {
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
-            body: JSON.stringify({ model, temperature: 0.2, messages }),
+            body: JSON.stringify({
+              model,
+              temperature: opt.temperature != null ? opt.temperature : 0.2,
+              max_tokens: opt.maxTokens || 900,
+              thinking: { type: 'disabled' },
+              messages,
+            }),
             signal: ctrl.signal,
           });
           clearTimeout(timer);
@@ -646,13 +653,14 @@ async function aiGeneratePoints() {
     const { text, kIdx } = await aiChat([
       { role: 'system', content: '你是初中/高中化学老师，只输出 JSON 数组，不要解释。' },
       { role: 'user', content: `请列出「${topic}」最常考的 6 个考点名称，每个 4–12 个字，简短、能直接当标签。只输出 JSON 字符串数组，例如 ["氧化还原本质","电子守恒配平"]。` },
-    ]);
+    ], { maxTokens: 260, temperature: 0.3 });
     const m = text.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('格式异常');
     const arr = JSON.parse(m[0]);
     if (!Array.isArray(arr) || !arr.length) throw new Error('返回为空');
     pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 16), on: false, busy: false }));
     renderPointChips();
+    prefetchPointDetails();
     toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (kIdx + 1) + '），点选后自动写详细笔记');
   } catch (e) {
     const fallback = CHEM_TOPICS[topic] || [];
@@ -667,23 +675,45 @@ async function aiGeneratePoints() {
   if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
 }
 
-async function aiExplainPoint(label) {
-  if (aiDetailCache[label]) return aiDetailCache[label];
-  const { text } = await aiChat([
-    { role: 'system', content: '你是初中/高中化学老师，只输出 JSON，不要解释。' },
-    { role: 'user', content: `针对考点「${label}」：\n1) key：核心知识，一句话 20–40 字；\n2) wrong：常见易错点，一句话 15–30 字。\n只输出 JSON：{"key":"…","wrong":"…"}` },
-  ]);
-  const m = text.match(/\{[\s\S]*\}/);
-  let out = '';
-  if (m) {
-    try {
-      const o = JSON.parse(m[0]);
-      out = [o.key && ('要点：' + String(o.key).trim()), o.wrong && ('易错：' + String(o.wrong).trim())].filter(Boolean).join('；');
-    } catch (_) { }
-  }
-  if (!out) out = String(text).replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s*\n+\s*/g, '；').slice(0, 140);
-  aiDetailCache[label] = out;
-  return out;
+const aiDetailInflight = {};
+
+function aiDetailPromise(label) {
+  if (aiDetailCache[label]) return Promise.resolve(aiDetailCache[label]);
+  if (aiDetailInflight[label]) return aiDetailInflight[label];
+  const task = (async () => {
+    const { text } = await aiChat([
+      { role: 'system', content: '你是资深初高中化学教师，讲解专业、准确，只输出 JSON。' },
+      { role: 'user', content: `针对考点「${label}」，面向中学生写课堂笔记内容：\n1) key：完整讲解 180–220 字，须包含定义或原理、规律或公式、典型反应（写化学方程式）以及适用条件或实验现象；\n2) wrong：常见易错点 50–70 字，说明学生最容易错在哪、正确做法是什么。\n只输出 JSON：{"key":"…","wrong":"…"}` },
+    ], { maxTokens: 900 });
+    const m = text.match(/\{[\s\S]*\}/);
+    let out = '';
+    if (m) {
+      try {
+        const o = JSON.parse(m[0]);
+        out = [o.key && ('要点：' + String(o.key).trim()), o.wrong && ('易错：' + String(o.wrong).trim())].filter(Boolean).join('；');
+      } catch (_) { }
+    }
+    if (!out) out = String(text).replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s*\n+\s*/g, '；').slice(0, 400);
+    aiDetailCache[label] = out;
+    return out;
+  })();
+  aiDetailInflight[label] = task;
+  task.catch(() => { }).then(() => { delete aiDetailInflight[label]; });
+  return task;
+}
+
+/* 生成标签后后台并发预取详情，点选时基本秒出 */
+function prefetchPointDetails() {
+  const labels = pointBuf.map(p => p.t).filter(t => t && !aiDetailCache[t]);
+  if (!labels.length) return;
+  let idx = 0;
+  const worker = async () => {
+    while (idx < labels.length) {
+      const t = labels[idx++];
+      try { await aiDetailPromise(t); } catch (_) { }
+    }
+  };
+  worker(); worker();
 }
 
 function formFeedback(f) {
@@ -796,7 +826,7 @@ async function toggleNotePoint(i) {
   ed.appendChild(el);
   syncNotes();
   try {
-    const detail = await aiExplainPoint(p.t);
+    const detail = await aiDetailPromise(p.t);
     el.textContent = `${p.t}｜${detail}`;
   } catch (e) {
     el.textContent = p.t;
