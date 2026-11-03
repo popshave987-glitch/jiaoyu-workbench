@@ -156,6 +156,7 @@ const NAV = [
   { id: 'home', t: '工作台首页', i: '🏠' },
   { id: 'students', t: '学生管理', i: '👥' },
   { id: 'courses', t: '课程管理', i: '🎒' },
+  { id: 'stats', t: '数据统计', i: '📈' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
   { id: 'assessments', t: '新生测评', i: '📊' },
   { id: 'plans', t: '学习规划', i: '🎯' },
@@ -278,10 +279,10 @@ function render() {
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
     assessments: viewAssessments,
-    plans: viewPlans, courses: viewCourses, data: viewData,
+    plans: viewPlans, courses: viewCourses, stats: viewStats, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
-  document.getElementById('fab').style.display = current === 'data' || current === 'home' ? 'none' : 'flex';
+  document.getElementById('fab').style.display = (current === 'data' || current === 'home' || current === 'stats') ? 'none' : 'flex';
 }
 
 /* ---------------- 首页 ---------------- */
@@ -1263,6 +1264,138 @@ function xlsxSheets(sheets) {
   return new Blob([zipStore(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
+/* ---------------- 数据统计 ---------------- */
+let statSid = '';
+
+function weekStart(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+function fmtMD(s) { const p = String(s).split('-'); return p.length === 3 ? `${+p[1]}月${+p[2]}日` : s; }
+
+function barsHTML(items, unit) {
+  const max = Math.max(1, ...items.map(x => x.v));
+  return items.map(x => `<div class="bar-row">
+      <span class="bar-label">${esc(x.k)}</span>
+      <span class="bar-track"><i style="width:${Math.round(x.v / max * 100)}%"></i></span>
+      <span class="bar-val">${x.v}${unit || ''}</span>
+    </div>`).join('') || '<div class="empty">暂无数据</div>';
+}
+
+function lineChartHTML(points) {
+  if (!points.length) return '<div class="empty">暂无数据</div>';
+  const W = 320, H = 150, pl = 30, pr = 12, pt = 12, pb = 26;
+  const maxV = Math.max(3, ...points.map(p => p.v));
+  const iw = W - pl - pr, ih = H - pt - pb;
+  const step = points.length > 1 ? iw / (points.length - 1) : 0;
+  const xy = points.map((p, i) => [pl + step * i, pt + ih - (p.v / maxV) * ih]);
+  let line = '', dots = '', labels = '', vals = '';
+  points.forEach((p, i) => {
+    const [x, y] = xy[i];
+    line += (i ? ' L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1);
+    dots += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="#028090"/>`;
+    vals += `<text x="${x.toFixed(1)}" y="${(y - 7).toFixed(1)}" text-anchor="middle" font-size="9" fill="#0F766E">${p.v}</text>`;
+    const show = points.length <= 6 || i % 2 === 0;
+    if (show) labels += `<text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="#94A3B8">${esc(p.l)}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <line x1="${pl}" y1="${H - pb}" x2="${W - pr}" y2="${H - pb}" stroke="#E2E8F0"/>
+    <path d="${line}" fill="none" stroke="#028090" stroke-width="1.6" stroke-linejoin="round"/>
+    ${dots}${vals}${labels}</svg>`;
+}
+
+function viewStats() {
+  const month = today().slice(0, 7);
+  const active = S.students.filter(s => s.status !== '已结课').length;
+  const fbMonth = S.feedbacks.filter(f => String(f.date || '').startsWith(month)).length;
+  const crMonth = S.courses.filter(c => String(c.date || '').startsWith(month)).length;
+  const photos = S.feedbacks.reduce((n, f) => n + ((f.photos || []).length), 0);
+
+  const clsMap = {};
+  S.students.forEach(s => { const k = classOf(s); clsMap[k] = (clsMap[k] || 0) + 1; });
+  const clsRows = Object.keys(clsMap).map(k => ({ k, v: clsMap[k] })).sort((a, b) => b.v - a.v);
+
+  // 近 8 周课次
+  const weeks = [];
+  let ws = weekStart(today());
+  for (let i = 7; i >= 0; i--) {
+    const d = new Date(ws + 'T00:00:00'); d.setDate(d.getDate() - i * 7);
+    weeks.push(d.toISOString().slice(0, 10));
+  }
+  const weekPts = weeks.map(w => ({
+    l: fmtMD(w), v: S.courses.filter(c => c.date && weekStart(c.date) === w).length,
+  }));
+
+  // 最近 10 节课反馈完成率
+  const recent = S.courses.slice().filter(c => (c.sids || []).length)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 10).reverse();
+  const donePts = recent.map(c => {
+    const done = (c.sids || []).filter(sid => courseFb(c.id, sid)).length;
+    return { l: String(c.date || '').slice(5), v: Math.round(done / c.sids.length * 100) };
+  });
+
+  // 科目分布
+  const subMap = {};
+  S.courses.forEach(c => { const k = c.subject || '化学'; subMap[k] = (subMap[k] || 0) + 1; });
+  const subRows = Object.keys(subMap).map(k => ({ k, v: subMap[k] })).sort((a, b) => b.v - a.v);
+
+  // 单个学生进步趋势
+  const withFb = S.students.filter(s => S.feedbacks.some(f => f.sid === s.id));
+  if (!statSid || !S.students.some(s => s.id === statSid)) statSid = withFb.length ? withFb[0].id : '';
+  const ratingV = { '优秀': 3, '良好': 2, '待加强': 1 };
+  const myFb = S.feedbacks.filter(f => f.sid === statSid)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).slice(-10);
+  const progPts = myFb.map(f => ({ l: String(f.date || '').slice(5), v: ratingV[f.rating || '良好'] || 2 }));
+
+  return `
+    <div class="stat-grid">
+      <div class="stat-card"><b>${S.students.length}</b><span>学生总数</span><i>在读 ${active}</i></div>
+      <div class="stat-card"><b>${S.courses.length}</b><span>累计课程</span><i>本月 ${crMonth} 节</i></div>
+      <div class="stat-card"><b>${S.feedbacks.length}</b><span>反馈记录</span><i>本月 ${fbMonth} 条</i></div>
+      <div class="stat-card"><b>${photos}</b><span>错题照片</span><i>原图存储</i></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">近 8 周上课次数</h3>
+      <div class="meta">按周统计，能看出课时密度变化</div>
+      ${lineChartHTML(weekPts)}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">班级人数分布</h3>
+      ${barsHTML(clsRows, ' 人')}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">最近 10 节课反馈完成率</h3>
+      <div class="meta">每节课已写反馈人数 ÷ 选课人数（%）</div>
+      ${lineChartHTML(donePts)}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">学生进步趋势</h3>
+      <div class="field" style="margin-bottom:8px">
+        <select id="statSid">
+          ${withFb.map(s => `<option value="${s.id}" ${s.id === statSid ? 'selected' : ''}>${esc(s.name)} · ${esc(classOf(s))}</option>`).join('') || '<option value="">还没有反馈</option>'}
+        </select>
+      </div>
+      <div class="meta">纵轴：3=优秀，2=良好，1=待加强（取每次反馈的评价）</div>
+      ${lineChartHTML(progPts)}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">课程科目分布</h3>
+      ${barsHTML(subRows, ' 节')}
+    </div>
+
+    <div class="tip" style="font-size:12px;color:#64748B;padding:0 4px">
+      统计直接来自本机 SQLite 数据，无需联网；数据越多图表越准。
+    </div>
+  `;
+}
+
 /* ---------------- 数据与备份 ---------------- */
 let expSid = '';
 function viewData() {
@@ -1724,6 +1857,7 @@ function bind() {
   document.addEventListener('scroll', hideCombo, true);
   window.addEventListener('resize', hideCombo);
   document.addEventListener('change', async (e) => {
+    if (e.target.id === 'statSid') { statSid = e.target.value; render(); return; }
     const id = e.target.id;
     if (id === 'conSid') { conSid = e.target.value; render(); }
     if (id === 'assSid') { assSid = e.target.value; render(); }
