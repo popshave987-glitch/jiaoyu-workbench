@@ -1534,9 +1534,10 @@ async function aiExecute(m) {
   }
 }
 
-const AI_BLOCK_WORDS = ['删除', '删掉', '删了', '移除', '清空', '清除', '作废', '撤销', '批量删'];
+const AI_BLOCK_WORDS = ['删除', '删掉', '删了', '删', '移除', '清空', '清除', '清掉', '清一下', '作废', '撤销', '干掉', '销毁', '抹掉', '销毁', 'delete', 'remove', 'drop', 'truncate'];
 function aiBlockedWord(q) {
-  return AI_BLOCK_WORDS.find(w => String(q || '').includes(w)) || '';
+  const t = String(q || '').toLowerCase();
+  return AI_BLOCK_WORDS.find(w => t.includes(String(w).toLowerCase())) || '';
 }
 function aiCourseConflict(a) {
   const name = String(a.name || '').trim();
@@ -1656,6 +1657,12 @@ async function aiSend(text) {
   aiBusyUi(true);
   try {
     const r = await aiRun(q, aiAbort.signal, img);
+    const ALLOWED = ['none', 'create_course', 'export'];
+    const type = (r.action && r.action.type) || 'none';
+    if (!ALLOWED.includes(type)) {
+      r.action = { type: 'none' };
+      r.reply = (r.reply || '') + '\n\n⚠️ 该操作不在白名单（只支持查询、建课、导出），已拦截。';
+    }
     const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
     if (r.action && r.action.type === 'create_course') m.status = 'pending';
     aiLog.push(m); saveAiLog();

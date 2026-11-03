@@ -10,8 +10,8 @@ android {
         applicationId = "com.che.jiaoyu"
         minSdk = 24
         targetSdk = 34
-        versionCode = 20
-        versionName = "1.18"
+        versionCode = 21
+        versionName = "1.19"
     }
 
     signingConfigs {
