@@ -367,3 +367,6 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .ai-confirm{margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #BAE6FD;border-radius:10px}
 .ai-confirm-t{font-size:12px;color:#028090;font-weight:600;margin-bottom:2px}
 .ai-confirm-d{font-size:12px;color:#334155;line-height:1.6;margin-bottom:6px}
+
+.ai-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+.ai-head-btns{display:flex;gap:6px;flex:0 0 auto}

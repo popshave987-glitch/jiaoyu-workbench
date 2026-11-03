@@ -156,12 +156,12 @@ const NAV = [
   { id: 'home', t: '工作台首页', i: '🏠' },
   { id: 'students', t: '学生管理', i: '👥' },
   { id: 'courses', t: '课程管理', i: '🎒' },
-  { id: 'ai', t: 'AI 助手', i: '🤖' },
   { id: 'stats', t: '数据统计', i: '📈' },
   { id: 'exports', t: '下载管理', i: '📥' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
   { id: 'assessments', t: '新生测评', i: '📊' },
   { id: 'plans', t: '学习规划', i: '🎯' },
+  { id: 'ai', t: 'AI 助手', i: '🤖' },
   { id: 'data', t: '数据与备份', i: '🗂️' },
 ];
 let current = 'home';
@@ -650,11 +650,16 @@ async function aiChat(messages, opt) {
   const keyOrder = cfg.keys.map((k, i) => i);
   if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
   if (aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
+  const userAborted = () => !!(opt.signal && opt.signal.aborted);
   const errs = [];
   for (const i of keyOrder) {
     for (const model of models) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const ctrl = new AbortController();
+        if (opt.signal) {
+          if (opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          opt.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+        }
         const timer = setTimeout(() => ctrl.abort(), 25000);
         try {
           const res = await fetch(endpoint, {
@@ -681,6 +686,7 @@ async function aiChat(messages, opt) {
           return { text, kIdx: i, model };
         } catch (e) {
           clearTimeout(timer);
+          if (userAborted()) throw new Error('已停止');
           if (e.name === 'AbortError' && attempt < 2) { await sleep(800); continue; }
           errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域')); break;
         }
@@ -1329,6 +1335,7 @@ const AI_COLUMNS = {
 };
 let aiLog = [];
 let aiBusy = false;
+let aiAbort = null;
 let aiPending = null;
 
 function loadAiLog() {
@@ -1410,7 +1417,7 @@ function aiParse(text) {
   return { reply: t, action: { type: 'none' } };
 }
 
-async function aiRun(text) {
+async function aiRun(text, signal) {
   const history = aiLog.filter(m => m.role !== 'sys').slice(-6).map(m => ({
     role: m.role === 'u' ? 'user' : 'assistant', content: m.text,
   }));
@@ -1420,7 +1427,7 @@ async function aiRun(text) {
     ...history,
     { role: 'user', content: text },
   ];
-  const r = await aiChat(messages, { temperature: 0.1, maxTokens: 1200 });
+  const r = await aiChat(messages, { temperature: 0.1, maxTokens: 1200, signal });
   return aiParse(r.text);
 }
 
@@ -1445,8 +1452,14 @@ function viewAi() {
   loadAiLog();
   return `
     <div class="card ai-card">
-      <h3 style="margin-top:0">🤖 AI 助手 <span class="tag gray">本机数据</span></h3>
-      <div class="meta">可以问数据、让我帮你建课程、按需导出定制表格（导出会进「下载管理」）。只能调用白名单功能，不会改代码，也不会把数据发到别处（仅走你配置的智谱接口）。</div>
+      <div class="ai-head">
+        <h3 style="margin:0">🤖 AI 助手 <span class="tag gray">本机数据</span></h3>
+        <div class="ai-head-btns">
+          <button class="btn sm" data-act="ai-new">新开对话</button>
+          <button class="btn sm danger" data-act="ai-del">删除对话</button>
+        </div>
+      </div>
+      <div class="meta">可以问数据、让我帮你建课程、按需导出定制表格（导出会进「下载管理」）。只能调用白名单功能，不会改代码，数据只走你配置的智谱接口。对话仅存本机，点右上角可随时清理。</div>
       <div class="ai-chat" id="aiChat">${aiRenderMsgs() || '<div class="ai-b ai-b-a">你好，我是她的助手。可以问我：这周谁没上课？本月反馈写完没？把 10 月的反馈导成表格。</div>'}</div>
       <div class="ai-chips">
         <button class="chip" data-act="ai-chip" data-q="给我这周的整体情况：课次、反馈、谁没上课">本周概览</button>
@@ -1526,7 +1539,11 @@ function aiCourseConflict(a) {
 }
 function aiBusyUi(on) {
   const btn = document.querySelector('[data-act="ai-send"]');
-  if (btn) { btn.disabled = !!on; btn.textContent = on ? '思考中…' : '发送'; }
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = on ? '停止' : '发送';
+    btn.classList.toggle('danger', !!on);
+  }
   document.querySelectorAll('.ai-chips .chip').forEach(b => { b.disabled = !!on; });
   const inp = document.getElementById('aiInput');
   if (inp) inp.disabled = !!on;
@@ -1549,17 +1566,20 @@ async function aiSend(text) {
   const box = document.getElementById('aiChat');
   if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
   aiBusy = true;
+  aiAbort = new AbortController();
   aiBusyUi(true);
   try {
-    const r = await aiRun(q);
+    const r = await aiRun(q, aiAbort.signal);
     const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
     if (r.action && r.action.type === 'create_course') m.status = 'pending';
     aiLog.push(m); saveAiLog();
     if (r.action && r.action.type === 'export') await aiExecute(m);
   } catch (e) {
-    aiLog.push({ role: 'a', text: '出错了：' + (e.message || e) });
+    if (String(e.message || e) === '已停止') toast('已停止');
+    else aiLog.push({ role: 'a', text: '出错了：' + (e.message || e) });
   }
   aiBusy = false;
+  aiAbort = null;
   saveAiLog(); render();
   aiBusyUi(false);
   setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
@@ -2401,9 +2421,27 @@ function bind() {
     }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
+    if (act === 'ai-new') {
+      if (aiLog.length && !confirm('新开对话？当前对话内容会被清空。')) return;
+      aiLog = [];
+      saveAiLog(); render();
+      toast('已新开对话');
+      return;
+    }
+    if (act === 'ai-del') {
+      if (!confirm('删除全部对话记录？删除后不可恢复。')) return;
+      aiLog = [];
+      try { localStorage.removeItem(AI_CHAT_KEY); } catch (_) { }
+      render();
+      toast('对话记录已删除');
+      return;
+    }
     if (act === 'ai-send') {
+      if (aiBusy) {
+        try { if (aiAbort) aiAbort.abort(); } catch (_) { }
+        return;
+      }
       const inp = document.getElementById('aiInput');
-      if (aiBusy) return toast('正在思考，请稍等');
       aiSend(inp ? inp.value : '');
       if (inp) inp.value = '';
       return;
