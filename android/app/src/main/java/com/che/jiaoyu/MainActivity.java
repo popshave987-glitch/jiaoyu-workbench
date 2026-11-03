@@ -12,6 +12,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 
 import androidx.webkit.WebViewAssetLoader;
 
@@ -19,8 +20,10 @@ public class MainActivity extends Activity {
 
     private static final String HOME_URL = "https://appassets.androidplatform.net/assets/index.html";
     private static final int REQ_FILE = 1001;
+    static final int REQ_IMPORT_DB = 1002;
 
     private WebView web;
+    private DbBridge bridge;
     private ValueCallback<Uri[]> filePathCallback;
 
     @Override
@@ -68,9 +71,40 @@ public class MainActivity extends Activity {
             }
         });
 
-        web.addJavascriptInterface(new DbBridge(this), "NativeDB");
+        bridge = new DbBridge(this);
+        web.addJavascriptInterface(bridge, "NativeDB");
 
         web.loadUrl(HOME_URL);
+    }
+
+    void shareDbFile(final Uri uri, final String name) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("application/octet-stream");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, name);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(send, "导出数据库"));
+            }
+        });
+    }
+
+    void pickDbFile() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                try {
+                    startActivityForResult(i, REQ_IMPORT_DB);
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
     }
 
     @Override
@@ -91,6 +125,19 @@ public class MainActivity extends Activity {
             if (filePathCallback != null) {
                 filePathCallback.onReceiveValue(uris);
                 filePathCallback = null;
+            }
+            return;
+        }
+        if (requestCode == REQ_IMPORT_DB) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                final Uri uri = data.getData();
+                String err = bridge.replaceDbFromUri(uri);
+                if (err == null) {
+                    Toast.makeText(this, "数据库已导入，正在刷新…", Toast.LENGTH_SHORT).show();
+                    web.reload();
+                } else {
+                    Toast.makeText(this, err, Toast.LENGTH_LONG).show();
+                }
             }
             return;
         }

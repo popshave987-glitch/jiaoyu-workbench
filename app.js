@@ -1262,6 +1262,13 @@ function viewData() {
         <button class="btn" data-act="xlsx-plans">学习规划</button>
       </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
+      ${hasNative() ? `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" data-act="export-db">导出数据库（.db）</button>
+        <button class="btn" data-act="import-db">导入数据库</button>
+      </div>
+      <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
+        .db 是完整数据库（含照片）。换手机时在新手机上先装 App，再到这里「导入数据库」，选之前导出的 .db 即可整库恢复。导入会覆盖本机数据。
+      </div>` : ''}
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
         导出为 .xlsx：表头加粗、冻结首行、可筛选。手机上请下载后用 WPS/Excel 打开（浏览器内预览可能显示空白）。JSON 用于整库恢复。
       </div>
@@ -1856,6 +1863,20 @@ function bind() {
     if (act.startsWith('xlsx-')) {
       if (act === 'xlsx-students') return exportRoster();
       exportExcel(act.slice(5), expSid);
+      return;
+    }
+    if (act === 'export-db') {
+      if (!hasNative()) return toast('网页版不支持导出 .db，请用 APK');
+      try {
+        const r = String(NATIVE.exportDb() || '');
+        if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
+        return toast('已生成数据库文件，在分享面板选「保存到文件」或发到微信');
+      } catch (e) { return toast('导出失败：' + (e.message || e)); }
+    }
+    if (act === 'import-db') {
+      if (!hasNative()) return toast('网页版不支持导入 .db');
+      if (!confirm('导入会覆盖本机全部数据且不可撤销，确定继续？')) return;
+      try { NATIVE.importDb(); } catch (e) { toast('无法打开文件选择器'); }
       return;
     }
     if (act === 'json-export') {

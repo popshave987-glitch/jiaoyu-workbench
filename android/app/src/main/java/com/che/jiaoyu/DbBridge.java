@@ -1,34 +1,48 @@
 package com.che.jiaoyu;
 
-import android.content.ContentValues;
-import android.content.Context;
+import android.app.Activity;
+import android.content.ContentResolver;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.net.Uri;
 import android.webkit.JavascriptInterface;
+
+import androidx.core.content.FileProvider;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
  * 网页与 SQLite 之间的桥：
- *   NativeDB.loadAll()        → 返回 {students:[...], courses:[...], ...}
- *   NativeDB.save(table, json) → 整表覆盖写入（页面每次保存调用一次）
- *   NativeDB.info()            → 数据库路径与体积
+ *   NativeDB.loadAll()            → 读取全部数据
+ *   NativeDB.save(table, json)    → 整表覆盖写入
+ *   NativeDB.info()               → 数据库路径与体积
+ *   NativeDB.exportDb()           → 生成 .db 并弹出分享面板
+ *   NativeDB.importDb()           → 选择 .db 文件，导入并覆盖
  */
 public class DbBridge {
 
     private static final Set<String> TABLES = new HashSet<>(Arrays.asList(
             "students", "contacts", "assessments", "feedbacks", "plans", "courses"));
 
+    private final MainActivity act;
     private final DbHelper helper;
     private SQLiteDatabase cachedDb;
 
-    public DbBridge(Context c) {
-        helper = new DbHelper(c.getApplicationContext());
+    public DbBridge(MainActivity a) {
+        act = a;
+        helper = new DbHelper(a.getApplicationContext());
     }
 
     private SQLiteDatabase db() {
@@ -36,6 +50,10 @@ public class DbBridge {
             cachedDb = helper.getWritableDatabase();
         }
         return cachedDb;
+    }
+
+    private File dbFile() {
+        return act.getDatabasePath(DbHelper.NAME);
     }
 
     @JavascriptInterface
@@ -85,7 +103,7 @@ public class DbBridge {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
                 if (o == null) continue;
-                ContentValues cv = new ContentValues();
+                android.content.ContentValues cv = new android.content.ContentValues();
                 cv.put("id", o.optString("id"));
                 cv.put("data", o.toString());
                 switch (table) {
@@ -138,9 +156,97 @@ public class DbBridge {
         try {
             o.put("engine", "SQLite");
             o.put("path", d.getPath());
-            o.put("size", new java.io.File(d.getPath()).length());
+            o.put("size", dbFile().length());
         } catch (Exception ignored) {
         }
         return o.toString();
+    }
+
+    /* ---------------- 导出 / 导入数据库 ---------------- */
+    private void closeDb() {
+        try {
+            if (cachedDb != null && cachedDb.isOpen()) {
+                cachedDb.rawQuery("PRAGMA wal_checkpoint(FULL)", null).close();
+                cachedDb.close();
+            }
+        } catch (Exception ignored) {
+        }
+        cachedDb = null;
+    }
+
+    @JavascriptInterface
+    public String exportDb() {
+        try {
+            closeDb();
+            File src = dbFile();
+            if (!src.exists()) return "ERR:数据库还不存在";
+            String stamp = new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.CHINA).format(new Date());
+            File out = new File(act.getCacheDir(), "教育活动台_" + stamp + ".db");
+            copyFile(src, out);
+            Uri uri = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", out);
+            act.shareDbFile(uri, out.getName());
+            return out.getAbsolutePath();
+        } catch (Exception e) {
+            return "ERR:" + e.getMessage();
+        }
+    }
+
+    @JavascriptInterface
+    public void importDb() {
+        act.pickDbFile();
+    }
+
+    /** 校验并替换数据库文件；返回 null 表示成功，否则返回错误文案 */
+    String replaceDbFromUri(Uri uri) {
+        File tmp = new File(act.getCacheDir(), "incoming.db");
+        try {
+            closeDb();
+            ContentResolver cr = act.getContentResolver();
+            InputStream in = cr.openInputStream(uri);
+            if (in == null) return "读不到文件";
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+            } finally {
+                try { in.close(); } catch (Exception ignored) {
+                }
+            }
+            if (!looksLikeOurDb(tmp)) return "不是本应用的数据库文件";
+            File dst = dbFile();
+            File parent = dst.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            new File(dst.getPath() + "-wal").delete();
+            new File(dst.getPath() + "-shm").delete();
+            copyFile(tmp, dst);
+            tmp.delete();
+            return null;
+        } catch (Exception e) {
+            return "导入失败：" + e.getMessage();
+        }
+    }
+
+    private boolean looksLikeOurDb(File f) {
+        SQLiteDatabase test = null;
+        Cursor c = null;
+        try {
+            test = SQLiteDatabase.openDatabase(f.getPath(), null, SQLiteDatabase.OPEN_READONLY);
+            c = test.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='students'", null);
+            return c.moveToFirst();
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) c.close();
+            if (test != null) test.close();
+        }
+    }
+
+    private void copyFile(File src, File dst) throws Exception {
+        try (FileInputStream fis = new FileInputStream(src);
+             FileOutputStream fos = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = fis.read(buf)) > 0) fos.write(buf, 0, n);
+        }
     }
 }
