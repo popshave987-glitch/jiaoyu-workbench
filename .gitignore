@@ -1,0 +1,5 @@
+android/app/src/main/assets/*
+!android/app/src/main/assets/.gitkeep
+android/.gradle/
+android/build/
+android/app/build/
