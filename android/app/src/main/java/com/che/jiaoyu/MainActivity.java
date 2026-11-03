@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
             }
         });
 
+        web.addJavascriptInterface(new DbBridge(this), "NativeDB");
+
         web.loadUrl(HOME_URL);
     }
 

@@ -17,7 +17,10 @@ function openDB() {
     r.onerror = () => rej(r.error);
   });
 }
-async function loadAll() {
+const NATIVE = (typeof window !== 'undefined' && window.NativeDB) ? window.NativeDB : null;
+function hasNative() { return !!(NATIVE && typeof NATIVE.loadAll === 'function'); }
+
+async function loadIDB() {
   const db = await openDB();
   await new Promise((res) => {
     const tx = db.transaction(STORE, 'readonly');
@@ -35,7 +38,34 @@ async function loadAll() {
   });
   db.close();
 }
+
+async function loadAll() {
+  if (hasNative()) {
+    let parsed = null;
+    try { parsed = JSON.parse(NATIVE.loadAll() || '{}'); } catch (_) { parsed = null; }
+    if (parsed) {
+      const total = KEYS.reduce((n, k) => n + ((parsed[k] || []).length), 0);
+      if (total > 0) {
+        KEYS.forEach(k => { S[k] = Array.isArray(parsed[k]) ? parsed[k] : []; });
+        return;
+      }
+    }
+    // SQLite 为空 → 从旧版 IndexedDB 迁移一次
+    await loadIDB();
+    if (KEYS.some(k => S[k].length)) await Promise.all(KEYS.map(saveKey));
+    return;
+  }
+  await loadIDB();
+}
+
 async function saveKey(key) {
+  if (hasNative()) {
+    try {
+      NATIVE.save(key, JSON.stringify(S[key] || []));
+      scheduleBackup();
+      return;
+    } catch (e) { }
+  }
   const db = await openDB();
   await new Promise((res, rej) => {
     const tx = db.transaction(STORE, 'readwrite');
@@ -1201,7 +1231,7 @@ function viewData() {
   const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划', courses: '课程' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
   return `
     <div class="notice" style="margin-bottom:12px">
-      数据只存在这台设备的浏览器里，不会上传。<b>换设备或清缓存前，请先导出备份。</b>
+      数据只存在这台设备（${hasNative() ? 'SQLite 数据库' : '浏览器 IndexedDB'}），不会上传。<b>换设备或卸载前，请先导出备份。</b>
     </div>
     <div class="card">
       <h3 style="margin-top:0">数据量</h3>${counts}
