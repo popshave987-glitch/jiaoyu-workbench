@@ -1509,15 +1509,47 @@ async function aiExecute(m) {
   }
 }
 
+const AI_BLOCK_WORDS = ['删除', '删掉', '删了', '移除', '清空', '清除', '作废', '撤销', '批量删'];
+function aiBlockedWord(q) {
+  return AI_BLOCK_WORDS.find(w => String(q || '').includes(w)) || '';
+}
+function aiCourseConflict(a) {
+  const name = String(a.name || '').trim();
+  const date = String(a.date || '').trim();
+  if (!name || !date) return '课程名称或日期缺失，请手动创建';
+  const dup = S.courses.find(c => String(c.date || '') === date && courseTitle(c) === name);
+  if (dup) return `已存在同日同名课程（${dup.date} ${courseTitle(dup)}），请手动创建或直接编辑原课程`;
+  const names = Array.isArray(a.students) ? a.students : [];
+  const same = names.filter(n => S.students.filter(st => st.name === n).length > 1);
+  if (same.length) return `学生姓名重名：${same.join('、')}，请手动创建并指定具体学生`;
+  return '';
+}
+function aiBusyUi(on) {
+  const btn = document.querySelector('[data-act="ai-send"]');
+  if (btn) { btn.disabled = !!on; btn.textContent = on ? '思考中…' : '发送'; }
+  document.querySelectorAll('.ai-chips .chip').forEach(b => { b.disabled = !!on; });
+  const inp = document.getElementById('aiInput');
+  if (inp) inp.disabled = !!on;
+}
+
 async function aiSend(text) {
   if (!aiReady()) return toast('请先在「数据与备份」里填写 API Key 和模型');
   const q = String(text || '').trim();
   if (!q) return;
+  if (aiBusy) return;
+  const blocked = aiBlockedWord(q);
+  if (blocked) {
+    aiLog.push({ role: 'u', text: q });
+    aiLog.push({ role: 'a', text: `为避免误操作，「${blocked}」这类操作不在 AI 里执行。\n请到对应页面手动删除（删除前会二次确认），谢谢。` });
+    saveAiLog(); render();
+    return;
+  }
   aiLog.push({ role: 'u', text: q });
   saveAiLog(); render();
   const box = document.getElementById('aiChat');
   if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
   aiBusy = true;
+  aiBusyUi(true);
   try {
     const r = await aiRun(q);
     const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
@@ -1529,6 +1561,7 @@ async function aiSend(text) {
   }
   aiBusy = false;
   saveAiLog(); render();
+  aiBusyUi(false);
   setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
 }
 
@@ -2381,6 +2414,13 @@ function bind() {
       const m = aiLog[i];
       if (!m || !m.action) return;
       const a = m.action.args || {};
+      const conflict = aiCourseConflict(a);
+      if (conflict) {
+        m.status = 'done';
+        m.text += '\n⚠️ ' + conflict;
+        saveAiLog(); render();
+        return toast(conflict);
+      }
       const names = Array.isArray(a.students) ? a.students : [];
       const sids = S.students.filter(st => names.includes(st.name)).map(st => st.id);
       if (!a.name || !a.date) return toast('课程信息不完整，请补充名称和日期');
