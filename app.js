@@ -156,6 +156,7 @@ const NAV = [
   { id: 'home', t: '工作台首页', i: '🏠' },
   { id: 'students', t: '学生管理', i: '👥' },
   { id: 'courses', t: '课程管理', i: '🎒' },
+  { id: 'ai', t: 'AI 助手', i: '🤖' },
   { id: 'stats', t: '数据统计', i: '📈' },
   { id: 'exports', t: '下载管理', i: '📥' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
@@ -280,7 +281,7 @@ function render() {
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
     assessments: viewAssessments,
-    plans: viewPlans, courses: viewCourses, stats: viewStats, exports: viewExports, data: viewData,
+    plans: viewPlans, courses: viewCourses, ai: viewAi, stats: viewStats, exports: viewExports, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
   document.getElementById('fab').style.display = (current === 'data' || current === 'home' || current === 'stats') ? 'none' : 'flex';
@@ -1319,6 +1320,194 @@ ${items}
   return true;
 }
 
+/* ---------------- AI 助手（白名单动作，仅本机数据） ---------------- */
+const AI_CHAT_KEY = 'ai_assistant_chat_v1';
+const AI_COLUMNS = {
+  students: ['姓名', '班级', '年级', '学校', '状态', '家长', '电话', '备注'],
+  courses: ['日期', '课程', '科目', '开始', '结束', '学生数', '已反馈', '备注'],
+  feedbacks: ['日期', '学生', '班级', '科目', '评价', '考点', '课堂表现', '进步点', '需加强', '默写'],
+};
+let aiLog = [];
+let aiBusy = false;
+let aiPending = null;
+
+function loadAiLog() {
+  try { aiLog = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || '[]'); } catch (_) { aiLog = []; }
+  if (!Array.isArray(aiLog)) aiLog = [];
+}
+function saveAiLog() {
+  try { localStorage.setItem(AI_CHAT_KEY, JSON.stringify(aiLog.slice(-30))); } catch (_) { }
+}
+
+function aiSnapshot() {
+  const stu = S.students.slice(0, 40).map(st => {
+    const x = studentStats(st.id);
+    return {
+      姓名: st.name, 班级: classOf(st), 状态: st.status || '', 课次: x.courses,
+      反馈数: x.fbs, 均分: x.avg ? +x.avg.toFixed(2) : null, 最近上课: x.lastCourse || '',
+    };
+  });
+  const courses = S.courses.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 20)
+    .map(c => ({
+      日期: c.date || '', 课程: courseTitle(c), 科目: c.subject || '', 学生数: (c.sids || []).length,
+      已反馈: (c.sids || []).filter(sid => courseFb(c.id, sid)).length,
+    }));
+  const fbs = S.feedbacks.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 15)
+    .map(f => ({
+      日期: f.date || '', 学生: studentName(f.sid), 评价: f.rating || '',
+      考点: String(f.topic || '').slice(0, 20), 需加强: String(f.weak || '').slice(0, 30),
+    }));
+  return { 学生: stu, 最近课程: courses, 最近反馈: fbs };
+}
+
+function aiSystemPrompt() {
+  return [
+    '你是「教育工作台」App 内置助手。你只能通过白名单动作读写本机数据，不能执行任意代码，也不能访问外部系统。',
+    '可用动作：',
+    '1) {"type":"none"} 只回答问题/分析数据。',
+    '2) {"type":"create_course","args":{"name":"课程名","subject":"化学","date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","students":["姓名",...]}} 新建课程（系统会先请用户确认）。',
+    '3) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
+    '导出列必须在白名单内：',
+    JSON.stringify(AI_COLUMNS),
+    '规则：回答用中文，简洁给结论+依据；不编造数据；数据不足就说不足；答案尽量可执行（给出下一步建议）。',
+    '输出格式必须严格为单个 JSON 对象：{"reply":"给用户看的文字","action":{"type":"none"}}。不要输出 JSON 以外的任何内容。',
+  ].join('\n');
+}
+
+function aiParse(text) {
+  let t = String(text || '').trim();
+  t = t.replace(/^```[a-z]*\n?/i, '').replace(/```$/,'').trim();
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a >= 0 && b > a) {
+    try {
+      const o = JSON.parse(t.slice(a, b + 1));
+      return { reply: String(o.reply || ''), action: o.action || { type: 'none' } };
+    } catch (_) { }
+  }
+  return { reply: t, action: { type: 'none' } };
+}
+
+async function aiRun(text) {
+  const history = aiLog.filter(m => m.role !== 'sys').slice(-6).map(m => ({
+    role: m.role === 'u' ? 'user' : 'assistant', content: m.text,
+  }));
+  const messages = [
+    { role: 'system', content: aiSystemPrompt() },
+    { role: 'system', content: '当前数据快照（JSON）：' + JSON.stringify(aiSnapshot()) },
+    ...history,
+    { role: 'user', content: text },
+  ];
+  const r = await aiChat(messages, { temperature: 0.2, maxTokens: 900 });
+  return aiParse(r.text);
+}
+
+function aiRenderMsgs() {
+  return aiLog.map((m, i) => {
+    if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(m.text)}</div>`;
+    let extra = '';
+    if (m.action && m.action.type === 'create_course' && m.status === 'pending') {
+      const a = m.action.args || {};
+      extra = `<div class="ai-confirm">
+        <div class="ai-confirm-t">将新建课程</div>
+        <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.subject || '化学')} · ${esc(a.date || '')} ${esc(a.start || '')}-${esc(a.end || '')}<br>学生：${esc((a.students || []).join('、') || '')}</div>
+        <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认创建</button>
+        <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
+      </div>`;
+    }
+    return `<div class="ai-b ai-b-a">${esc(m.text).replace(/\n/g, '<br>')}${extra}</div>`;
+  }).join('');
+}
+
+function viewAi() {
+  loadAiLog();
+  return `
+    <div class="card ai-card">
+      <h3 style="margin-top:0">🤖 AI 助手 <span class="tag gray">本机数据</span></h3>
+      <div class="meta">可以问数据、让我帮你建课程、按需导出定制表格（导出会进「下载管理」）。只能调用白名单功能，不会改代码，也不会把数据发到别处（仅走你配置的智谱接口）。</div>
+      <div class="ai-chat" id="aiChat">${aiRenderMsgs() || '<div class="ai-b ai-b-a">你好，我是她的助手。可以问我：这周谁没上课？本月反馈写完没？把 10 月的反馈导成表格。</div>'}</div>
+      <div class="ai-chips">
+        <button class="chip" data-act="ai-chip" data-q="给我这周的整体情况：课次、反馈、谁没上课">本周概览</button>
+        <button class="chip" data-act="ai-chip" data-q="哪些学生超过两周没上课了？">久未上课</button>
+        <button class="chip" data-act="ai-chip" data-q="把本月的反馈记录导出成表格">导出本月反馈</button>
+        <button class="chip" data-act="ai-chip" data-q="帮我新建一节明天的化学课，学生有张皓然">新建课程</button>
+      </div>
+      <div class="ai-input">
+        <textarea id="aiInput" rows="2" placeholder="例如：帮我把九慧1班的学生导成表格"></textarea>
+        <button class="btn primary" data-act="ai-send">发送</button>
+      </div>
+    </div>
+  `;
+}
+
+function aiExportRows(source, columns, from, to) {
+  let rows = [];
+  if (source === 'students') {
+    rows = S.students.map(st => ({
+      姓名: st.name, 班级: classOf(st), 年级: st.grade || '', 学校: st.school || '', 状态: st.status || '',
+      家长: st.parent || '', 电话: st.phone || '', 备注: st.note || '',
+    }));
+  } else if (source === 'courses') {
+    rows = S.courses.map(c => ({
+      日期: c.date || '', 课程: courseTitle(c), 科目: c.subject || '', 开始: c.start || '', 结束: c.end || '',
+      学生数: (c.sids || []).length, 已反馈: (c.sids || []).filter(sid => courseFb(c.id, sid)).length, 备注: c.note || '',
+    }));
+  } else if (source === 'feedbacks') {
+    rows = S.feedbacks.map(f => ({
+      日期: f.date || '', 学生: studentName(f.sid), 班级: classOf(studentById(f.sid) || {}), 科目: f.subject || '',
+      评价: f.rating || '', 考点: f.topic || '', 课堂表现: f.performance || '',
+      进步点: f.progress || f.good || '', 需加强: f.weak || '', 默写: f.dictation || '',
+    }));
+  } else {
+    return null;
+  }
+  if (from) rows = rows.filter(r => String(r.日期 || '').slice(0, 10) >= from);
+  if (to) rows = rows.filter(r => String(r.日期 || '').slice(0, 10) <= to);
+  const cols = (columns && columns.length ? columns : AI_COLUMNS[source]).filter(c => AI_COLUMNS[source].includes(c));
+  return { rows, cols: cols.length ? cols : AI_COLUMNS[source] };
+}
+
+function aiCsv(rows, cols) {
+  const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [cols.map(q).join(',')];
+  rows.forEach(r => lines.push(cols.map(c => q(r[c])).join(',')));
+  return '\ufeff' + lines.join('\r\n');
+}
+
+async function aiExecute(m) {
+  const act = m.action || { type: 'none' };
+  if (act.type === 'export') {
+    const a = act.args || {};
+    const built = aiExportRows(a.source, a.columns, a.from, a.to);
+    if (!built || !built.rows.length) { m.text += '\n（没有匹配的数据，已经按当前条件查过了）'; return; }
+    const safe = String(a.name || ('导出_' + today())).replace(/[\\/:*?"<>|]/g, '');
+    await downloadBlob(safe + '.csv', new Blob([aiCsv(built.rows, built.cols)], { type: 'text/csv' }));
+    m.text += `\n已导出 ${built.rows.length} 行 · ${built.cols.join('、')}`;
+  }
+}
+
+async function aiSend(text) {
+  if (!aiReady()) return toast('请先在「数据与备份」里填写 API Key 和模型');
+  const q = String(text || '').trim();
+  if (!q) return;
+  aiLog.push({ role: 'u', text: q });
+  saveAiLog(); render();
+  const box = document.getElementById('aiChat');
+  if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
+  aiBusy = true;
+  try {
+    const r = await aiRun(q);
+    const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
+    if (r.action && r.action.type === 'create_course') m.status = 'pending';
+    aiLog.push(m); saveAiLog();
+    if (r.action && r.action.type === 'export') await aiExecute(m);
+  } catch (e) {
+    aiLog.push({ role: 'a', text: '出错了：' + (e.message || e) });
+  }
+  aiBusy = false;
+  saveAiLog(); render();
+  setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
+}
+
 /* ---------------- 数据统计 ---------------- */
 let statSid = '';
 
@@ -2155,6 +2344,39 @@ function bind() {
     }
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
+    if (act === 'ai-send') {
+      const inp = document.getElementById('aiInput');
+      if (aiBusy) return toast('正在思考，请稍等');
+      aiSend(inp ? inp.value : '');
+      if (inp) inp.value = '';
+      return;
+    }
+    if (act === 'ai-chip') return aiSend(t.dataset.q);
+    if (act === 'ai-confirm') {
+      const i = +t.dataset.idx;
+      const m = aiLog[i];
+      if (!m || !m.action) return;
+      const a = m.action.args || {};
+      const names = Array.isArray(a.students) ? a.students : [];
+      const sids = S.students.filter(st => names.includes(st.name)).map(st => st.id);
+      if (!a.name || !a.date) return toast('课程信息不完整，请补充名称和日期');
+      if (!sids.length) return toast('没找到对应学生，请用系统里已有的姓名');
+      S.courses.push({
+        id: uid(), created: Date.now(), name: a.name, subject: a.subject || '化学', date: a.date,
+        start: a.start || DEFAULT_TIMES.start, end: a.end || DEFAULT_TIMES.end, note: a.note || '', sids,
+      });
+      saveKey('courses');
+      m.status = 'done';
+      m.text += `\n✅ 已创建：${a.name}（${a.date}，${sids.length} 名学生）`;
+      saveAiLog(); render();
+      toast('课程已创建');
+      return;
+    }
+    if (act === 'ai-cancel') {
+      const i = +t.dataset.idx;
+      if (aiLog[i]) { aiLog[i].status = 'done'; aiLog[i].text += '\n已取消'; saveAiLog(); render(); }
+      return;
+    }
     if (act === 'exp-open') {
       if (!hasNative()) return;
       try {
