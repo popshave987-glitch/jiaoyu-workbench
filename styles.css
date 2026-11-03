@@ -262,3 +262,15 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .chip.lv0 { border-color: #F3C1C4; background: #FFF3F3; color: #A3312B; }
 .chip.lv1 { border-color: #F7DCA8; background: #FEF7E8; color: #8B5E00; }
 .chip.lv2 { border-color: #BDE6D8; background: #EAF9F3; color: #0B6B5B; }
+
+/* ---------------- 课程管理 ---------------- */
+.course-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+.course-emoji{font-size:20px;line-height:1}
+.badge{font-size:11px;padding:2px 9px;border-radius:999px;background:#EEF2F6;color:#64748B;white-space:nowrap}
+.badge.done{background:#E6F4F7;color:#028090;font-weight:600}
+.pick-group{font-size:11.5px;color:#028090;font-weight:600;margin:12px 0 4px;letter-spacing:.5px}
+.pick-row{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #F1F5F9;cursor:pointer}
+.pick-row:last-child{border-bottom:0}
+.pick-row .meta{margin-left:auto;color:#94A3B8;font-size:11.5px}
+.pick-row input[type=checkbox]{width:18px;height:18px;accent-color:#028090}
+.pick-list{max-height:260px;overflow:auto;margin-top:8px;border:1px solid #E2E8F0;border-radius:10px;padding:4px 10px;background:#fff}

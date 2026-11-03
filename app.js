@@ -5,8 +5,8 @@
 
 const DB_NAME = 'chems_teach_v1';
 const STORE = 'kv';
-const KEYS = ['students', 'contacts', 'assessments', 'feedbacks', 'plans'];
-const S = { students: [], contacts: [], assessments: [], feedbacks: [], plans: [] };
+const KEYS = ['students', 'contacts', 'assessments', 'feedbacks', 'plans', 'courses'];
+const S = { students: [], contacts: [], assessments: [], feedbacks: [], plans: [], courses: [] };
 
 /* ---------------- 存储 ---------------- */
 function openDB() {
@@ -125,6 +125,7 @@ async function copyText(text, okMsg) {
 const NAV = [
   { id: 'home', t: '工作台首页', i: '🏠' },
   { id: 'students', t: '学生管理', i: '👥' },
+  { id: 'courses', t: '课程管理', i: '🎒' },
   { id: 'contacts', t: '家长沟通', i: '💬' },
   { id: 'assessments', t: '新生测评', i: '📊' },
   { id: 'feedbacks', t: '上课反馈', i: '📝' },
@@ -178,6 +179,7 @@ const COMBO_SRC = {
   name: () => uniq(S.students.map(s => s.name)),
   grade: () => uniq(['初一', '初二', '初三', '高一', '高二', '高三'].concat(S.students.map(s => s.grade))),
   school: () => uniq(S.students.map(s => s.school)),
+  cls: () => uniq(['九慧1班', '九慧2班', '九慧小3班', '高一班'].concat(S.students.map(s => s.cls))),
   subject: () => uniq(['化学', '数学', '物理', '英语', '语文', '生物'].concat(
     S.students.flatMap(s => String(s.subjects || '').split(/[，,、\s]+/)))),
 };
@@ -246,7 +248,7 @@ function render() {
   const v = ({
     home: viewHome, students: viewStudents, contacts: viewContacts,
     assessments: viewAssessments, feedbacks: viewFeedbacks,
-    plans: viewPlans, data: viewData,
+    plans: viewPlans, courses: viewCourses, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
   document.getElementById('fab').style.display = current === 'data' || current === 'home' ? 'none' : 'flex';
@@ -361,6 +363,7 @@ function formStudent(s) {
       ${field('年级', combo('grade', s.grade, '如 初三', COMBO_SRC.grade()))}
       ${field('学校', combo('school', s.school, '如 实验中学', COMBO_SRC.school()))}
     </div>
+    ${field('班级', combo('cls', s.cls, '如 九慧1班', COMBO_SRC.cls()), '导出反馈表按班级分 sheet，建议都填')}
     ${field('科目', combo('subjects', s.subjects, '化学', COMBO_SRC.subject()), '填过科目会自动出现在下拉里')}
     <div class="grid2">
       ${field('状态', `<select name="status">
@@ -678,7 +681,8 @@ async function aiGeneratePoints() {
 
 function formFeedback(f) {
   f = f || {};
-  return field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
+  return `<input type="hidden" name="courseId" value="${esc(f.courseId || '')}">` +
+    field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
     `<div class="grid2">
       ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
@@ -788,10 +792,296 @@ function formPlan(p) {
     field('任务清单（每行一条）', `<textarea name="tasks">${esc(tasksText)}</textarea>`, '每天 2 道计算题\n每周一次错题回顾');
 }
 
+/* ---------------- 课程管理 ---------------- */
+const COURSE_SUBJECTS = ['化学', '数学', '物理', '英语', '语文', '生物', '历史', '地理', '政治'];
+const DEFAULT_TIMES = { start: '08:00', end: '17:00' };
+let curCourse = '';
+let coursePick = null; // Set<sid>：导出勾选，默认全选
+
+function classOf(s) { return (s && String(s.cls || '').trim()) || '未分班'; }
+function courseById(id) { return S.courses.find(c => c.id === id); }
+function courseStudents(c) { return ((c && c.sids) || []).map(id => studentById(id)).filter(Boolean); }
+function courseFb(cid, sid) {
+  const list = S.feedbacks.filter(f => f.courseId === cid && f.sid === sid);
+  return list[list.length - 1] || null;
+}
+function fmtCn(dateStr) {
+  if (!dateStr) return '____ 年 __ 月 __ 日';
+  const p = String(dateStr).split('-');
+  return p.length === 3 ? `${+p[0]} 年 ${+p[1]} 月 ${+p[2]} 日` : dateStr;
+}
+function groupByClass(students) {
+  const g = {};
+  students.forEach(s => { const k = classOf(s); (g[k] = g[k] || []).push(s); });
+  return g;
+}
+
+function viewCourses() {
+  if (curCourse && courseById(curCourse)) return viewCourseDetail(courseById(curCourse));
+  curCourse = '';
+  const list = S.courses.slice().sort((a, b) =>
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    String(b.created || '').localeCompare(String(a.created || '')));
+  return `
+    <div class="notice" style="margin-bottom:12px">先建课程、勾选学生；课后点进课程逐个写反馈，最后导出反馈表。</div>
+    <div class="section-title"><h2>共 ${list.length} 个课程</h2>
+      <div class="row" style="gap:8px"><button class="btn sm primary" data-act="add-course">＋ 新建课程</button></div>
+    </div>
+    ${list.map(c => {
+    const total = (c.sids || []).length;
+    const done = (c.sids || []).filter(sid => courseFb(c.id, sid)).length;
+    return `<div class="card">
+        <div class="row"><span class="course-emoji">🎒</span><strong>${esc(c.name)}</strong>
+          <span class="tag">${esc(c.subject || '化学')}</span><span class="spacer"></span>
+          <span class="meta">${esc(c.date || '')}</span></div>
+        <div class="meta" style="margin-top:4px">${esc(c.start || DEFAULT_TIMES.start)}–${esc(c.end || DEFAULT_TIMES.end)} · ${total} 名学生 · 已写反馈 ${done}/${total}</div>
+        ${c.note ? `<div class="meta">${esc(c.note)}</div>` : ''}
+        <div class="btns">
+          <button class="btn sm primary" data-act="open-course" data-id="${c.id}">进入课程</button>
+          <button class="btn sm" data-act="export-course" data-id="${c.id}">导出反馈表</button>
+          <button class="btn sm" data-act="edit-course" data-id="${c.id}">编辑</button>
+          <button class="btn sm danger" data-act="del-course" data-id="${c.id}">删除</button>
+        </div>
+      </div>`;
+  }).join('') || `<div class="empty">还没有课程，点「＋ 新建课程」开始</div>`}`;
+}
+
+function viewCourseDetail(c) {
+  const stus = courseStudents(c);
+  if (!coursePick || coursePick._cid !== c.id) { coursePick = new Set(c.sids || []); coursePick._cid = c.id; }
+  const groups = groupByClass(stus);
+  return `
+    <div class="course-head">
+      <button class="btn sm" data-act="back-courses">← 返回</button>
+      <strong style="font-size:16px">${esc(c.name)}</strong>
+      <span class="tag">${esc(c.subject || '化学')}</span>
+    </div>
+    <div class="meta" style="margin:6px 2px 12px">${esc(c.date || '')} · ${esc(c.start || DEFAULT_TIMES.start)}–${esc(c.end || DEFAULT_TIMES.end)} · ${stus.length} 名学生</div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">导出范围</h3>
+        <div class="row" style="gap:6px">
+          <button class="btn sm" data-act="pick-all">全选</button>
+          <button class="btn sm" data-act="pick-none">全不选</button>
+        </div>
+      </div>
+      <div class="tip" style="margin:6px 0;font-size:12px;color:#64748B">默认全部学生；取消勾选可不导出该学生。按班级自动分 sheet。</div>
+      ${Object.keys(groups).sort().map(cls => `<div class="pick-group">${esc(cls)}</div>` +
+      groups[cls].map(s => `<label class="pick-row">
+          <input type="checkbox" data-act="pick-sid" data-sid="${s.id}" ${coursePick.has(s.id) ? 'checked' : ''}>
+          <span>${esc(s.name)}</span><span class="meta">${esc(classOf(s))}${courseFb(c.id, s.id) ? ' · 已反馈' : ''}</span>
+        </label>`).join('')).join('')}
+      <div class="btns" style="margin-top:10px">
+        <button class="btn primary block" data-act="export-course-now" data-id="${c.id}">导出反馈表（已选 ${coursePick.size} 人）</button>
+      </div>
+    </div>
+    <div class="section-title"><h2>逐个学生写反馈</h2><div class="meta">共 ${stus.length} 人</div></div>
+    ${stus.map(s => {
+    const f = courseFb(c.id, s.id);
+    return `<div class="card">
+        <div class="row"><strong>${esc(s.name)}</strong><span class="tag">${esc(classOf(s))}</span>
+          <span class="spacer"></span>${f ? `<span class="badge done">已反馈</span>` : `<span class="badge">待反馈</span>`}</div>
+        ${f ? `<div class="meta" style="margin-top:4px">课堂表现：${esc(f.performance || '—')}${f.progress ? ` · 进步点：${esc(f.progress)}` : ''}${(f.photos || []).length ? ` · 错题照片 ${(f.photos || []).length} 张` : ''}</div>` : ''}
+        <div class="btns">
+          <button class="btn sm primary" data-act="course-feedback" data-id="${c.id}" data-sid="${s.id}">${f ? '编辑反馈' : '写反馈'}</button>
+          ${(f && (f.photos || []).length) ? `<button class="btn sm" data-act="dl-photos" data-id="${f.id}">下载错题照片</button>` : ''}
+        </div>
+      </div>`;
+  }).join('') || `<div class="empty">这个课程还没选学生</div>`}`;
+}
+
+function formCourse(c) {
+  c = c || {};
+  const sids = new Set(c.sids || []);
+  const groups = groupByClass(S.students);
+  const pickList = Object.keys(groups).sort().map(cls => `<div class="pick-group">${esc(cls)}</div>` +
+    groups[cls].map(s => `<label class="pick-row" data-pick-row data-kw="${esc((s.name + ' ' + classOf(s) + ' ' + (s.school || '')).toLowerCase())}">
+      <input type="checkbox" name="courseSids" value="${s.id}" ${sids.has(s.id) ? 'checked' : ''}>
+      <span>${esc(s.name)}</span><span class="meta">${esc(classOf(s))}</span>
+    </label>`).join('')).join('');
+  return field('课程名称', input('name', c.name, '如 九慧1班 周三晚辅')) +
+    `<div class="grid2">
+      ${field('科目', `<select name="subject">${COURSE_SUBJECTS.map(x => `<option ${c.subject === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
+      ${field('日期', input('date', c.date || today(), '', 'date'))}
+    </div>
+    <div class="grid2">
+      ${field('开始时间', input('start', c.start || DEFAULT_TIMES.start, '', 'time'))}
+      ${field('结束时间', input('end', c.end || DEFAULT_TIMES.end, '', 'time'))}
+    </div>
+    ${field('备注', textarea('note', c.note, '本节进度、注意事项…'))}
+    ${field('选择学生', `<input id="pickQ" placeholder="搜索姓名 / 班级" oninput="filterPick(this.value)" autocomplete="off">
+      <div class="pick-list" id="pickList">${pickList || '<div class="empty">还没有学生，先去学生管理添加</div>'}</div>`, '勾选本次课参加的学生')}`;
+}
+function filterPick(q) {
+  q = String(q || '').trim().toLowerCase();
+  document.querySelectorAll('#pickList [data-pick-row]').forEach(r => {
+    r.style.display = (!q || (r.dataset.kw || '').indexOf(q) > -1) ? '' : 'none';
+  });
+}
+
+function saveCourse(o, id) {
+  if (!o.name) return toast('请填课程名称');
+  const sids = [...document.getElementById('modal').querySelectorAll('input[name="courseSids"]:checked')].map(x => x.value);
+  if (!sids.length) return toast('至少勾选一个学生');
+  const data = {
+    name: o.name.trim(), subject: o.subject || '化学', date: o.date || today(),
+    start: o.start || DEFAULT_TIMES.start, end: o.end || DEFAULT_TIMES.end,
+    note: o.note || '', sids,
+  };
+  if (id) Object.assign(courseById(id), data);
+  else {
+    const nid = uid();
+    S.courses.push({ id: nid, created: Date.now(), ...data });
+    curCourse = nid;
+  }
+  saveKey('courses'); closeModal(); render(); toast('已保存');
+}
+
+function openCourseFeedback(cid, sid) {
+  const c = courseById(cid); if (!c) return;
+  const old = courseFb(cid, sid);
+  photoBuf = (old && old.photos) ? old.photos.slice() : [];
+  initPoints(old || { topic: '' });
+  if (old && (old.points || []).length) pointBuf = old.points.slice();
+  openModal(`写反馈 · ${studentName(sid)}`, formFeedback({ sid, courseId: cid, date: c.date, subject: c.subject, ...(old || {}) }),
+    '保存', f => saveFeedback(formData(f), old ? old.id : null));
+  renderPhotoPrev(); renderPointChips();
+}
+
+/* ---------------- 课后反馈表（模板导出） ---------------- */
+const TPL_WIDTHS = [6.7, 12.7, 10.7, 15.7, 30.7, 30.7, 16.7, 15.7];
+const TPL_HEADERS = ['编号', '学生姓名', '课堂表现', '课后作业订正', '进步点', '需要加强的点', '默写检查情况', '备注'];
+const TPL_GUIDE = '填写说明：① 课堂表现按 1–5 星评分；② 课后作业订正填“全部完成 / 部分完成 / 未完成”，并注明未订正题号；③ 进步点与需加强的点各写 1–2 句具体、可观察的事实；④ 默写检查记录错处（如“化学式错 2 处”“未参加”）。';
+
+function pointsBrief(f) {
+  return (f.points || []).map(p => `${p.t}（${['不会', '半会', '会'][p.lv]}）`).join('；');
+}
+function tplSheet(cls, subtitle, students, fbOf) {
+  const rows = [
+    [],
+    [{ v: '智汇尚学 · 课后学情反馈表', s: 2 }],
+    [{ v: `班级：${cls}     课次：第 ______ 次课`, s: 0 }, '', '', '', { v: subtitle, s: 0 }],
+    TPL_HEADERS.map(v => ({ v, s: 1 })),
+  ];
+  students.forEach((s, i) => {
+    const f = fbOf(s) || {};
+    rows.push([
+      { v: i + 1, s: 4 }, { v: s.name, s: 4 },
+      { v: f.performance || '', s: 0 },
+      { v: f.homework || f.task || '', s: 0 },
+      { v: f.progress || f.good || '', s: 0 },
+      { v: f.weak || '', s: 0 },
+      { v: f.dictation || '', s: 0 },
+      { v: [pointsBrief(f), f.notes || f.content || ''].filter(Boolean).join('\n'), s: 0 },
+    ]);
+  });
+  rows.push([{ v: TPL_GUIDE, s: 3 }]);
+  return {
+    name: cls, rows, widths: TPL_WIDTHS, heights: [8, 26, 20, 22],
+    merges: ['A2:H2', 'A3:D3', 'E3:H3', `A${rows.length}:H${rows.length}`],
+  };
+}
+function fileSafe(x) { return String(x == null ? '' : x).replace(/[\\/:*?"<>|]/g, '').trim(); }
+
+function exportCourse(cid, onlySids) {
+  const c = courseById(cid); if (!c) return;
+  const sids = (onlySids && onlySids.length) ? onlySids : (c.sids || []);
+  if (!sids.length) return toast('没有可导出的学生');
+  const groups = groupByClass(sids.map(studentById).filter(Boolean));
+  const sheets = Object.keys(groups).sort().map(cls => tplSheet(
+    cls, `上课日期：${fmtCn(c.date)}     授课教师：__________`, groups[cls], s => courseFb(cid, s.id)));
+  if (!sheets.length) return toast('没有可导出的学生');
+  downloadBlob(`${fileSafe(c.date)}_${fileSafe(c.name)}_课后反馈表.xlsx`, xlsxSheets(sheets));
+  toast(`已导出 ${sheets.length} 个班`);
+}
+
+function exportRoster() {
+  if (!S.students.length) return toast('还没有学生');
+  const groups = groupByClass(S.students);
+  const sheets = Object.keys(groups).sort().map(cls => tplSheet(
+    cls, '上课日期：____ 年 __ 月 __ 日     授课教师：__________', groups[cls], () => null));
+  downloadBlob(`学生名单_${today()}.xlsx`, xlsxSheets(sheets));
+  toast('已导出学生名单');
+}
+
+/* 多工作簿导出（模板样式） */
+function sheetXmlTpl(sp) {
+  const rows = sp.rows || [];
+  const cols = sp.widths && sp.widths.length
+    ? `<cols>${sp.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
+    : '';
+  const body = rows.map((row, ri) => {
+    const cells = (row || []).map((c, ci) => {
+      const ref = colName(ci) + (ri + 1);
+      const isObj = c && typeof c === 'object';
+      const st = isObj ? (c.s || 0) : 0;
+      const v = isObj ? c.v : c;
+      const sAttr = st ? ` s="${st}"` : '';
+      if (v == null || v === '') return `<c r="${ref}"${sAttr}/>`;
+      if (typeof v === 'number') return `<c r="${ref}"${sAttr}><v>${v}</v></c>`;
+      return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
+    }).join('');
+    const h = sp.heights && sp.heights[ri] ? ` ht="${sp.heights[ri]}" customHeight="1"` : '';
+    return `<row r="${ri + 1}"${h}>${cells}</row>`;
+  }).join('');
+  const merges = (sp.merges || []).length
+    ? `<mergeCells count="${sp.merges.length}">${sp.merges.map(r => `<mergeCell ref="${r}"/>`).join('')}</mergeCells>` : '';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="${XLSX_NS}"><sheetData>${body}</sheetData>${merges}${cols}</worksheet>`;
+}
+function cleanSheetName(n, i) {
+  let s = String(n || ('表' + (i + 1))).replace(/[\\/?*\[\]:]/g, '').slice(0, 31);
+  return s || ('表' + (i + 1));
+}
+function xlsxSheets(sheets) {
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="${XLSX_NS}">
+<fonts count="4"><font><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><sz val="14"/><name val="Microsoft YaHei"/></font><font><sz val="10.5"/><color rgb="FF64748B"/><name val="Microsoft YaHei"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F4F7"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB7C9CE"/></left><right style="thin"><color rgb="FFB7C9CE"/></right><top style="thin"><color rgb="FFB7C9CE"/></top><bottom style="thin"><color rgb="FFB7C9CE"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="5">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const ctOverrides = sheets.map((sp, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('');
+  const sheetTags = sheets.map((sp, i) => `<sheet name="${xmlEsc(cleanSheetName(sp.name, i))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('');
+  const rels = sheets.map((sp, i) => `<Relationship Id="rId${i + 1}" Type="${REL_NS}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+    `<Relationship Id="rId${sheets.length + 1}" Type="${REL_NS}/styles" Target="styles.xml"/>`;
+
+  const files = [
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${ctOverrides}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+    },
+    {
+      name: 'xl/workbook.xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="${XLSX_NS}" xmlns:r="${REL_NS}"><sheets>${sheetTags}</sheets></workbook>`
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`
+    },
+    { name: 'xl/styles.xml', data: styles },
+    ...sheets.map((sp, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: sheetXmlTpl(sp) })),
+  ];
+  return new Blob([zipStore(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
 /* ---------------- 数据与备份 ---------------- */
 let expSid = '';
 function viewData() {
-  const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
+  const counts = KEYS.map(k => `<div class="meta">${({ students: '学生', contacts: '沟通记录', assessments: '测评', feedbacks: '反馈', plans: '规划', courses: '课程' })[k]}：<b>${S[k].length}</b> 条</div>`).join('');
   return `
     <div class="notice" style="margin-bottom:12px">
       数据只存在这台设备的浏览器里，不会上传。<b>换设备或清缓存前，请先导出备份。</b>
@@ -1316,9 +1606,32 @@ function bind() {
     if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }
     if (act === 'add-plan') { if (!S.students.length) return toast('请先添加学生'); return OPEN.plan(sid); }
 
+    // 课程
+    if (act === 'add-course') { if (!S.students.length) return toast('请先添加学生'); return openModal('新建课程', formCourse(), '保存', f => saveCourse(formData(f))); }
+    if (act === 'edit-course') return openModal('编辑课程', formCourse(courseById(id)), '保存', f => saveCourse(formData(f), id));
+    if (act === 'del-course') {
+      if (!confirm('删除这个课程？（已写的反馈会保留）')) return;
+      S.courses = S.courses.filter(x => x.id !== id);
+      if (curCourse === id) curCourse = '';
+      await saveKey('courses'); render(); return;
+    }
+    if (act === 'open-course') { curCourse = id; coursePick = null; render(); return; }
+    if (act === 'back-courses') { curCourse = ''; coursePick = null; render(); return; }
+    if (act === 'export-course') return exportCourse(id, null);
+    if (act === 'export-course-now') return exportCourse(id, [...(coursePick || [])]);
+    if (act === 'course-feedback') return openCourseFeedback(id, t.dataset.sid);
+    if (act === 'pick-all') { coursePick = new Set(courseStudents(courseById(curCourse)).map(x => x.id)); coursePick._cid = curCourse; render(); return; }
+    if (act === 'pick-none') { coursePick = new Set(); coursePick._cid = curCourse; render(); return; }
+    if (act === 'pick-sid') {
+      if (!coursePick) { coursePick = new Set(); coursePick._cid = curCourse; }
+      if (t.checked) coursePick.add(t.dataset.sid); else coursePick.delete(t.dataset.sid);
+      render(); return;
+    }
+
     if (act === 'export-page') {
       const mod = t.dataset.mod;
       const sid = ({ contacts: conSid, assessments: assSid, feedbacks: fbSid, plans: plSid, students: '' })[mod] || '';
+      if (mod === 'students') return exportRoster();
       exportExcel(mod, sid);
       return;
     }
@@ -1382,6 +1695,7 @@ function bind() {
 
     // 数据页
     if (act.startsWith('xlsx-')) {
+      if (act === 'xlsx-students') return exportRoster();
       exportExcel(act.slice(5), expSid);
       return;
     }
