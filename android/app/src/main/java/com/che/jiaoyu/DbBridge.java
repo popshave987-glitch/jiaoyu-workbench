@@ -149,6 +149,28 @@ public class DbBridge {
         }
     }
 
+    /** 原图直接落盘，返回文件名；网页通过 /photos/<文件名> 访问 */
+    @JavascriptInterface
+    public String savePhoto(String hint, String mime, String base64) {
+        try {
+            byte[] data = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+            String ext = (mime != null && mime.contains("png")) ? "png"
+                    : (mime != null && mime.contains("webp")) ? "webp"
+                    : (mime != null && mime.contains("heic")) ? "heic"
+                    : (mime != null && mime.contains("gif")) ? "gif" : "jpg";
+            String name = "ph_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 10000) + "." + ext;
+            File dir = new File(act.getFilesDir(), "photos");
+            if (!dir.exists()) dir.mkdirs();
+            File f = new File(dir, name);
+            try (FileOutputStream fos = new FileOutputStream(f)) {
+                fos.write(data);
+            }
+            return name;
+        } catch (Throwable e) {
+            return "ERR:" + e.getMessage();
+        }
+    }
+
     @JavascriptInterface
     public String info() {
         SQLiteDatabase d = db();
@@ -178,17 +200,44 @@ public class DbBridge {
     public String exportDb() {
         try {
             closeDb();
-            File src = dbFile();
-            if (!src.exists()) return "ERR:数据库还不存在";
+            if (!dbFile().exists()) return "ERR:数据库还不存在";
             String stamp = new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.CHINA).format(new Date());
-            File out = new File(act.getCacheDir(), "教育活动台_" + stamp + ".db");
-            copyFile(src, out);
+            File out = new File(act.getCacheDir(), "教育活动台_" + stamp + ".zip");
+            buildBackupZip(out);
             Uri uri = FileProvider.getUriForFile(act, act.getPackageName() + ".fileprovider", out);
             act.shareDbFile(uri, out.getName());
             return out.getAbsolutePath();
         } catch (Exception e) {
             return "ERR:" + e.getMessage();
         }
+    }
+
+    /** 备份包 = jiaoyu.db + photos/ 原图 */
+    void buildBackupZip(File out) throws Exception {
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(new FileOutputStream(out))) {
+            File db = dbFile();
+            if (db.exists()) {
+                zos.putNextEntry(new java.util.zip.ZipEntry("jiaoyu.db"));
+                try (FileInputStream fis = new FileInputStream(db)) { pipe(fis, zos); }
+                zos.closeEntry();
+            }
+            File photos = new File(act.getFilesDir(), "photos");
+            File[] list = photos.listFiles();
+            if (list != null) {
+                for (File f : list) {
+                    if (!f.isFile()) continue;
+                    zos.putNextEntry(new java.util.zip.ZipEntry("photos/" + f.getName()));
+                    try (FileInputStream fis = new FileInputStream(f)) { pipe(fis, zos); }
+                    zos.closeEntry();
+                }
+            }
+        }
+    }
+
+    private void pipe(java.io.InputStream in, java.io.OutputStream out) throws Exception {
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
     }
 
     @JavascriptInterface
@@ -213,28 +262,69 @@ public class DbBridge {
 
     /** 校验并替换数据库文件；返回 null 表示成功，否则返回错误文案 */
     String replaceDbFromUri(Uri uri) {
-        File tmp = new File(act.getCacheDir(), "incoming.db");
+        File tmp = new File(act.getCacheDir(), "incoming.pkg");
         try {
             closeDb();
             ContentResolver cr = act.getContentResolver();
             InputStream in = cr.openInputStream(uri);
             if (in == null) return "读不到文件";
-            try (FileOutputStream fos = new FileOutputStream(tmp)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
-            } finally {
-                try { in.close(); } catch (Exception ignored) {
+            try (FileOutputStream fos = new FileOutputStream(tmp)) { pipe(in, fos); }
+            finally { try { in.close(); } catch (Exception ignored) { } }
+
+            if (isZip(tmp)) return restoreZip(tmp);
+            if (!looksLikeOurDb(tmp)) return "不是本应用的备份文件";
+            return swapDb(tmp);
+        } catch (Exception e) {
+            return "导入失败：" + e.getMessage();
+        } finally {
+            tmp.delete();
+        }
+    }
+
+    private boolean isZip(File f) {
+        try (FileInputStream in = new FileInputStream(f)) {
+            byte[] b = new byte[2];
+            return in.read(b) == 2 && b[0] == 'P' && b[1] == 'K';
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String restoreZip(File zip) throws Exception {
+        File tmpDb = new File(act.getCacheDir(), "incoming.db");
+        File photoDir = new File(act.getFilesDir(), "photos");
+        if (!photoDir.exists()) photoDir.mkdirs();
+        int photoCount = 0;
+        try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(new FileInputStream(zip))) {
+            java.util.zip.ZipEntry e;
+            while ((e = zis.getNextEntry()) != null) {
+                String name = e.getName();
+                if (name.equals("jiaoyu.db")) {
+                    try (FileOutputStream fos = new FileOutputStream(tmpDb)) { pipe(zis, fos); }
+                } else if (name.startsWith("photos/") && !e.isDirectory()) {
+                    String fn = name.substring(7).replace("..", "").replace("\\", "/");
+                    if (fn.length() == 0 || fn.contains("/")) continue;
+                    File f = new File(photoDir, fn);
+                    try (FileOutputStream fos = new FileOutputStream(f)) { pipe(zis, fos); }
+                    photoCount++;
                 }
+                zis.closeEntry();
             }
-            if (!looksLikeOurDb(tmp)) return "不是本应用的数据库文件";
+        }
+        if (!tmpDb.exists() || !looksLikeOurDb(tmpDb)) return "备份包里没有有效的数据库";
+        String err = swapDb(tmpDb);
+        tmpDb.delete();
+        return err == null ? null : err;
+    }
+
+    private String swapDb(File src) {
+        try {
             File dst = dbFile();
             File parent = dst.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
             new File(dst.getPath() + "-wal").delete();
             new File(dst.getPath() + "-shm").delete();
-            copyFile(tmp, dst);
-            tmp.delete();
+            copyFile(src, dst);
             return null;
         } catch (Exception e) {
             return "导入失败：" + e.getMessage();

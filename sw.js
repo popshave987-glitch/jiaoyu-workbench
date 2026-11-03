@@ -1,4 +1,4 @@
-const CACHE = 'jiaoyu-v28';
+const CACHE = 'jiaoyu-v29';
 const FILES = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

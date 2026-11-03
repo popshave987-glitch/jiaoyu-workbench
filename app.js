@@ -508,34 +508,48 @@ function assessText(a) {
 /* ---------------- 反馈 ---------------- */
 let photoBuf = [];   // 当前弹窗里的错题照片（压缩后的 dataURL）
 
-function compressImage(file, max, quality) {
-  max = max || 1280; quality = quality || 0.72;
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      let w = img.naturalWidth, h = img.naturalHeight;
-      const scale = Math.min(1, max / Math.max(w, h));
-      w = Math.round(w * scale); h = Math.round(h * scale);
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      let out = c.toDataURL('image/jpeg', quality);
-      // 单张控制在 ~300KB 内
-      let q = quality;
-      while (out.length > 400000 && q > 0.4) { q -= 0.1; out = c.toDataURL('image/jpeg', q); }
-      resolve(out);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
-    img.src = url;
+const NATIVE_ORIGIN = (typeof location !== 'undefined') ? location.origin : '';
+function photoURL(p) {
+  if (typeof p === 'string' && p.indexOf('data:') === 0) return p;
+  return NATIVE_ORIGIN + '/photos/' + encodeURIComponent(String(p || ''));
+}
+function readAsDataURL(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = () => rej(fr.error || new Error('读取失败'));
+    fr.readAsDataURL(file);
   });
 }
+async function photoToFile(p, name) {
+  if (typeof p === 'string' && p.indexOf('data:') === 0) return dataUrlToFile(p, name);
+  const blob = await (await fetch(photoURL(p))).blob();
+  return new File([blob], name, { type: blob.type || 'image/jpeg' });
+}
+async function migratePhotosToFiles() {
+  if (!hasNative() || typeof NATIVE.savePhoto !== 'function') return;
+  let changed = false;
+  for (const f of S.feedbacks) {
+    const arr = f.photos || [];
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      if (typeof p === 'string' && p.indexOf('data:') === 0) {
+        try {
+          const mime = (p.match(/^data:([^;]+);/) || [])[1] || 'image/jpeg';
+          const name = String(NATIVE.savePhoto('', mime, (p.split(',')[1] || '')));
+          if (name && name.indexOf('ERR:') !== 0) { arr[i] = name; changed = true; }
+        } catch (_) { }
+      }
+    }
+  }
+  if (changed) await saveKey('feedbacks');
+}
+
 function renderPhotoPrev() {
   const box = document.getElementById('photoPrev');
   if (!box) return;
   box.innerHTML = photoBuf.map((p, i) =>
-    `<div class="photo"><img src="${p}" alt="错题 ${i + 1}"><button data-act="del-photo" data-idx="${i}">×</button></div>`
+    `<div class="photo"><img src="${photoURL(p)}" alt="错题 ${i + 1}"><button data-act="del-photo" data-idx="${i}">×</button></div>`
   ).join('');
 }
 function openPhoto(src) {
@@ -801,7 +815,10 @@ function dataUrlToFile(dataUrl, name) {
 async function shareFeedback(f) {
   const text = feedbackText(f);
   const photos = f.photos || [];
-  const files = photos.map((p, i) => dataUrlToFile(p, `${studentName(f.sid)}_错题${i + 1}.jpg`));
+  const files = [];
+  for (let i = 0; i < photos.length; i++) {
+    try { files.push(await photoToFile(photos[i], `${studentName(f.sid)}_错题${i + 1}.jpg`)); } catch (_) { }
+  }
   if (files.length && navigator.canShare && navigator.canShare({ files })) {
     try { await navigator.share({ text, files }); return; }
     catch (e) { if (e && e.name === 'AbortError') return; }
@@ -809,13 +826,20 @@ async function shareFeedback(f) {
   copyText(text, '文字已复制；照片请用「下载照片」后一起发送');
   if (files.length) downloadPhotos(f);
 }
-function downloadPhotos(f) {
-  (f.photos || []).forEach((p, i) => {
-    const a = document.createElement('a');
-    a.href = p;
-    a.download = `${studentName(f.sid)}_错题${i + 1}.jpg`;
-    a.click();
-  });
+async function downloadPhotos(f) {
+  const photos = f.photos || [];
+  for (let i = 0; i < photos.length; i++) {
+    try {
+      const p = photos[i];
+      const isData = typeof p === 'string' && p.indexOf('data:') === 0;
+      const href = isData ? p : URL.createObjectURL(await (await fetch(photoURL(p))).blob());
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `${studentName(f.sid)}_错题${i + 1}.jpg`;
+      a.click();
+      if (!isData) setTimeout(() => URL.revokeObjectURL(href), 1500);
+    } catch (_) { }
+  }
   toast('照片已下载到相册/下载目录');
 }
 /* ---------------- 富文本笔记 + 考点选择 ---------------- */
@@ -1264,11 +1288,11 @@ function viewData() {
       </div>
       <div style="margin-top:10px"><button class="btn primary block" data-act="json-export">导出全部数据（JSON 备份）</button></div>
       ${hasNative() ? `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" data-act="export-db">导出数据库（.db）</button>
-        <button class="btn" data-act="import-db">导入数据库</button>
+        <button class="btn" data-act="export-db">导出备份包（.zip）</button>
+        <button class="btn" data-act="import-db">导入备份包</button>
       </div>
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
-        .db 是完整数据库（含照片）。换手机时在新手机上先装 App，再到这里「导入数据库」，选之前导出的 .db 即可整库恢复。导入会覆盖本机数据。
+        .zip 是完整备份包（数据库 + 原图照片）。换手机时先装 App，再到这里「导入备份包」，选之前导出的 .zip 即可整库恢复。导入会覆盖本机数据。
       </div>` : ''}
       <div class="tip" style="margin-top:8px;font-size:12px;color:#64748B">
         导出为 .xlsx：表头加粗、冻结首行、可筛选。手机上请下载后用 WPS/Excel 打开（浏览器内预览可能显示空白）。JSON 用于整库恢复。
@@ -1697,11 +1721,21 @@ function bind() {
       if (p) { p.tasks[+e.target.dataset.idx].done = e.target.checked; await saveKey('plans'); render(); }
     }
     if (e.target.name === 'photos' && e.target.files && e.target.files.length) {
-      toast('正在处理照片…');
+      toast('正在保存原图…');
       const files = [...e.target.files];
       for (const file of files) {
         if (photoBuf.length >= 12) { toast('最多 12 张'); break; }
-        try { photoBuf.push(await compressImage(file)); } catch (_) { toast('有图片读取失败'); }
+        try {
+          const dataUrl = await readAsDataURL(file);
+          if (hasNative() && typeof NATIVE.savePhoto === 'function') {
+            const mime = (dataUrl.match(/^data:([^;]+);/) || [])[1] || file.type || 'image/jpeg';
+            const name = String(NATIVE.savePhoto('', mime, (String(dataUrl).split(',')[1] || '')));
+            if (name.indexOf('ERR:') === 0) throw new Error(name);
+            photoBuf.push(name);
+          } else {
+            photoBuf.push(dataUrl);   // 网页版：原图不压缩
+          }
+        } catch (e) { toast('有图片保存失败：' + String(e.message || e).slice(0, 20)); }
       }
       e.target.value = '';
       renderPhotoPrev();
@@ -1867,7 +1901,7 @@ function bind() {
       return;
     }
     if (act === 'export-db') {
-      if (!hasNative()) return toast('网页版不支持导出 .db，请用 APK');
+      if (!hasNative()) return toast('网页版不支持导出备份包，请用 APK');
       try {
         const r = String(NATIVE.exportDb() || '');
         if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
@@ -1875,7 +1909,7 @@ function bind() {
       } catch (e) { return toast('导出失败：' + (e.message || e)); }
     }
     if (act === 'import-db') {
-      if (!hasNative()) return toast('网页版不支持导入 .db');
+      if (!hasNative()) return toast('网页版不支持导入备份包');
       if (!confirm('导入会覆盖本机全部数据且不可撤销，确定继续？')) return;
       try { NATIVE.importDb(); } catch (e) { toast('无法打开文件选择器'); }
       return;
@@ -1948,6 +1982,7 @@ function route() {
   if (hasNative() && typeof NATIVE.autoBackup === 'function') {
     try { NATIVE.autoBackup(); } catch (_) { }
   }
+  if (hasNative()) migratePhotosToFiles().catch(() => { });
   if ('serviceWorker' in navigator) {
     const hadSW = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('./sw.js').then(reg => {

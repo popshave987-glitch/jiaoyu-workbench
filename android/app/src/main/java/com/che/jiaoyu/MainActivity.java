@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+
+import java.io.File;
 import android.view.KeyEvent;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -43,8 +45,12 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
 
+        File photoDir = new File(getFilesDir(), "photos");
+        if (!photoDir.exists()) photoDir.mkdirs();
+
         final WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .addPathHandler("/photos/", new PhotoHandler(photoDir))
                 .build();
 
         web.setWebViewClient(new WebViewClient() {

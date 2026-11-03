@@ -68,10 +68,10 @@ public class EmailBackup {
                     File attach;
                     String attachName;
                     String note;
-                    if (zipDb(dbFile, zip) && zip.length() <= MAX_ATTACH_BYTES) {
+                    if (zipDb(ctx, dbFile, zip) && zip.length() <= MAX_ATTACH_BYTES) {
                         attach = zip;
                         attachName = "教育工作台备份_" + today + ".zip";
-                        note = "附件为完整数据库（含错题照片），下载后在 App「数据与备份 → 导入数据库」即可整库恢复。";
+                        note = "附件为完整备份包（数据库 + 原图照片），下载后在 App「数据与备份 → 导入数据库」即可整库恢复。";
                     } else {
                         zip.delete();
                         attach = buildTextJson(ctx, dbFile, today);
@@ -161,7 +161,7 @@ public class EmailBackup {
         }
     }
 
-    private static boolean zipDb(File db, File zip) {
+    private static boolean zipDb(Context ctx, File db, File zip) {
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zip))) {
             zos.putNextEntry(new ZipEntry("jiaoyu.db"));
             try (FileInputStream fis = new FileInputStream(db)) {
@@ -170,6 +170,20 @@ public class EmailBackup {
                 while ((n = fis.read(buf)) > 0) zos.write(buf, 0, n);
             }
             zos.closeEntry();
+            File photos = new File(ctx.getFilesDir(), "photos");
+            File[] list = photos.listFiles();
+            if (list != null) {
+                for (File f : list) {
+                    if (!f.isFile()) continue;
+                    zos.putNextEntry(new ZipEntry("photos/" + f.getName()));
+                    try (FileInputStream fis = new FileInputStream(f)) {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = fis.read(buf)) > 0) zos.write(buf, 0, n);
+                    }
+                    zos.closeEntry();
+                }
+            }
             return true;
         } catch (Throwable e) {
             return false;
