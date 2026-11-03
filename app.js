@@ -282,6 +282,7 @@ function viewHome() {
 
 function studentCard(s, compact) {
   const tags = [];
+  tags.push(`<span class="tag cls">${esc(classOf(s))}</span>`);
   if (s.grade) tags.push(`<span class="tag">${esc(s.grade)}</span>`);
   (s.subjects || '').split(/[，,、\s]+/).filter(Boolean).forEach(x => tags.push(`<span class="tag">${esc(x)}</span>`));
   (s.status ? [s.status] : []).forEach(x => tags.push(`<span class="tag gray">${esc(x)}</span>`));
@@ -312,14 +313,14 @@ function studentCard(s, compact) {
 }
 
 /* ---------------- 学生 ---------------- */
-let stuQ = '', stuFilter = '';
+let stuQ = '', stuCls = '';
 function filteredStudents() {
   let list = S.students.slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''));
   if (stuQ) {
     const q = stuQ.toLowerCase();
-    list = list.filter(s => (s.name + s.school + s.parent + s.note).toLowerCase().includes(q));
+    list = list.filter(s => (s.name + s.school + s.parent + s.note + classOf(s)).toLowerCase().includes(q));
   }
-  if (stuFilter) list = list.filter(s => s.grade === stuFilter);
+  if (stuCls) list = list.filter(s => classOf(s) === stuCls);
   return list;
 }
 function studentListHTML() {
@@ -336,15 +337,18 @@ function refreshStudentList() {
   updateStuCount();
 }
 function viewStudents() {
-  const grades = [...new Set(S.students.map(s => s.grade).filter(Boolean))];
+  const classes = [...new Set(S.students.map(s => classOf(s)))];
+  const tabs = [''].concat(classes);
+  const tabHTML = tabs.map(c => {
+    const label = c || '全部';
+    const n = c ? S.students.filter(s => classOf(s) === c).length : S.students.length;
+    return `<button class="cls-tab${stuCls === c ? ' active' : ''}" data-act="filter-cls" data-cls="${esc(c)}">${esc(label)}<span class="n">${n}</span></button>`;
+  }).join('');
   return `
     <div class="searchbar">
-      <input id="stuQ" placeholder="搜索学生 / 学校 / 家长" value="${esc(stuQ)}" autocomplete="off">
-      <select id="stuFilter">
-        <option value="">全部年级</option>
-        ${grades.map(g => `<option ${g === stuFilter ? 'selected' : ''}>${esc(g)}</option>`).join('')}
-      </select>
+      <input id="stuQ" placeholder="搜索学生 / 班级 / 学校" value="${esc(stuQ)}" autocomplete="off">
     </div>
+    <div class="cls-bar">${tabHTML}</div>
     <div class="section-title"><h2 id="stuCount">共 ${filteredStudents().length} 人</h2>${pageActions('students','add-student','＋ 添加学生')}</div>
     <div id="stuList">${studentListHTML()}</div>
   `;
@@ -1536,7 +1540,6 @@ function bind() {
   window.addEventListener('resize', hideCombo);
   document.addEventListener('change', async (e) => {
     const id = e.target.id;
-    if (id === 'stuFilter') { stuFilter = e.target.value; refreshStudentList(); }
     if (id === 'conSid') { conSid = e.target.value; render(); }
     if (id === 'assSid') { assSid = e.target.value; render(); }
     if (id === 'fbSid') { fbSid = e.target.value; render(); }
@@ -1608,6 +1611,7 @@ function bind() {
       await saveKey('students'); render(); return toast('已删除');
     }
     if (act === 'add-student') return OPEN.student();
+    if (act === 'filter-cls') { stuCls = t.dataset.cls || ''; render(); return; }
     if (act === 'add-contact') { if (!S.students.length) return toast('请先添加学生'); return OPEN.contact(sid); }
     if (act === 'add-assessment') { if (!S.students.length) return toast('请先添加学生'); return OPEN.assessment(sid); }
     if (act === 'add-feedback') { if (!S.students.length) return toast('请先添加学生'); return OPEN.feedback(sid); }

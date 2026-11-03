@@ -274,3 +274,14 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .pick-row .meta{margin-left:auto;color:#94A3B8;font-size:11.5px}
 .pick-row input[type=checkbox]{width:18px;height:18px;accent-color:#028090}
 .pick-list{max-height:260px;overflow:auto;margin-top:8px;border:1px solid #E2E8F0;border-radius:10px;padding:4px 10px;background:#fff}
+
+/* 学生班级横栏 */
+.cls-bar{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.cls-bar::-webkit-scrollbar{display:none}
+.cls-tab{flex:0 0 auto;border:1px solid var(--line);background:#fff;color:var(--dark);
+  border-radius:999px;padding:7px 14px;font-size:13px;font-weight:500;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.cls-tab .n{font-size:11px;color:#94A3B8;font-weight:600}
+.cls-tab.active{background:var(--secondary,#028090);border-color:var(--secondary,#028090);color:#fff;font-weight:600}
+.cls-tab.active .n{color:rgba(255,255,255,.85)}
+.tag.cls{background:#E6F4F7;color:#028090;border-color:#BFE3E9;font-weight:600}
