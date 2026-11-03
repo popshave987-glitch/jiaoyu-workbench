@@ -1264,6 +1264,60 @@ function xlsxSheets(sheets) {
   return new Blob([zipStore(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
+/* 网页版：生成打印页，浏览器「另存为 PDF」 */
+function exportPdfWeb(sid) {
+  const st = studentById(sid);
+  if (!st) return;
+  const list = S.feedbacks.filter(f => f.sid === sid)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const items = list.map((f, i) => {
+    const rows = [
+      ['课堂表现', f.performance],
+      ['课后作业', f.homework || f.task],
+      ['进步点', f.progress || f.good],
+      ['需要加强', f.weak],
+      ['默写检查', f.dictation],
+    ].filter(x => x[1]);
+    const notes = htmlToNotes(f.notes || f.content || '');
+    const photos = (f.photos || []).map(p => `<img src="${photoURL(p)}" alt="错题">`).join('');
+    return `<section>
+      <h2>反馈 ${i + 1} &nbsp; ${esc(f.date || '')} &nbsp; ${esc(f.subject || '化学')}</h2>
+      ${f.topic ? `<p><b>考点：</b>${esc(f.topic)}</p>` : ''}
+      ${rows.map(r => `<p><b>${r[0]}：</b>${esc(r[1])}</p>`).join('')}
+      ${notes ? `<p><b>课堂笔记：</b><br>${esc(notes).replace(/\n/g, '<br>')}</p>` : ''}
+      ${photos ? `<div class="photos">${photos}</div>` : ''}
+    </section>`;
+  }).join('') || '<p>还没有反馈记录</p>';
+
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(st.name)}_课堂反馈_${today()}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:"Microsoft YaHei",system-ui,sans-serif;color:#334155;margin:28px 26px;font-size:13px;line-height:1.8}
+  h1{font-size:19px;color:#028090;margin:0 0 6px}
+  .sub{color:#64748B;font-size:12px;margin:0 0 14px;border-bottom:1px solid #E2E8F0;padding-bottom:10px}
+  section{margin:0 0 16px;page-break-inside:avoid}
+  h2{font-size:14px;color:#0F172A;margin:0 0 6px}
+  p{margin:2px 0}
+  b{color:#028090}
+  .photos{margin-top:6px;display:flex;flex-direction:column;gap:8px}
+  .photos img{width:100%;max-height:240px;object-fit:contain;border:1px solid #E2E8F0;border-radius:6px}
+  @media print{body{margin:10mm} section{page-break-inside:avoid} img{page-break-inside:avoid}}
+</style></head><body>
+<h1>车老师 · 学生课堂反馈</h1>
+<p class="sub">${esc(st.name)} &nbsp; ${esc(classOf(st))} &nbsp; 导出日期：${today()} &nbsp; 共 ${list.length} 条反馈</p>
+${items}
+<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},350)});<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) return toast('浏览器拦截了弹窗，请允许弹窗后重试');
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  return true;
+}
+
 /* ---------------- 数据统计 ---------------- */
 let statSid = '';
 
@@ -1933,7 +1987,10 @@ function bind() {
 
     if (act === 'edit-student') return openModal('编辑学生', formStudent(studentById(id)), '保存', f => saveStudent(formData(f), id));
     if (act === 'student-pdf') {
-      if (!hasNative() || typeof NATIVE.exportStudentPdf !== 'function') return toast('网页版请用浏览器打印为 PDF');
+      if (!hasNative() || typeof NATIVE.exportStudentPdf !== 'function') {
+        if (exportPdfWeb(id)) toast('已打开打印页，选择「另存为 PDF」即可');
+        return;
+      }
       try {
         const r = String(NATIVE.exportStudentPdf(id, studentName(id)) || '');
         if (r.indexOf('ERR:') === 0) return toast('导出失败：' + r.slice(4));
