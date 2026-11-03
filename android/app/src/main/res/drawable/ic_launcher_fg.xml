@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 锥形瓶：瓶颈 + 瓶体 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M51.3,28.8 L63.3,28.8 L63.3,46.8 L75.6,75.6 L32.4,75.6 L51.3,46.8 Z" />
+
+    <!-- 瓶底平台 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30.3,76.9 L77.7,76.9 L77.7,81 L30.3,81 Z" />
+
+    <!-- 气泡 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M45.9,25.5 m-3.15,0 a3.15,3.15 0 1,0 6.3,0 a3.15,3.15 0 1,0 -6.3,0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M56.7,22.9 m-2.25,0 a2.25,2.25 0 1,0 4.5,0 a2.25,2.25 0 1,0 -4.5,0" />
+</vector>
