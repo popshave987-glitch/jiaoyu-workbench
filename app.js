@@ -1942,6 +1942,11 @@ function route() {
   bind();
   window.addEventListener('hashchange', route);
   route();
+
+  // APK：每天首次打开自动把数据库发到邮箱（无网/失败都静默）
+  if (hasNative() && typeof NATIVE.autoBackup === 'function') {
+    try { NATIVE.autoBackup(); } catch (_) { }
+  }
   if ('serviceWorker' in navigator) {
     const hadSW = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('./sw.js').then(reg => {

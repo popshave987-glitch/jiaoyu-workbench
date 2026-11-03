@@ -192,6 +192,21 @@ public class DbBridge {
     }
 
     @JavascriptInterface
+    public void autoBackup() {
+        try {
+            Cursor c = db().rawQuery("SELECT COUNT(*) FROM students", null);
+            int n = 0;
+            if (c.moveToFirst()) n = c.getInt(0);
+            c.close();
+            if (n <= 0) return;   // 还没有学生数据，不推送空库
+        } catch (Exception e) {
+            return;
+        }
+        closeDb();
+        EmailBackup.triggerDaily(act.getApplicationContext(), dbFile());
+    }
+
+    @JavascriptInterface
     public void importDb() {
         act.pickDbFile();
     }
