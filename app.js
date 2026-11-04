@@ -719,17 +719,31 @@ async function aiChat(messages, opt) {
   throw new Error([...new Set(errs)].slice(0, 4).join(' / ') || '未知错误');
 }
 
+function aiModalCtx() {
+  const m = document.getElementById('modal');
+  const sid = (m && m.querySelector('select[name="sid"]') || {}).value || '';
+  const subject = String((m && m.querySelector('[name="subject"]') || {}).value || '化学').trim();
+  const st = studentById(sid);
+  const raw = String((st && (st.grade || '')) || '');
+  const cls = st ? classOf(st) : '';
+  const src = raw || cls;
+  const g = (src.match(/初[一二三]|高[一二三]/) || [])[0] || '';
+  const stage = /^初/.test(g) ? ('初中 ' + g) : /^高/.test(g) ? ('高中 ' + g) : (raw || cls || '年级未填');
+  return { name: st ? st.name : '', stage, subject, key: stage + '|' + subject };
+}
+
 async function aiGeneratePoints() {
   const cfg = aiCfg();
   if (!cfg.keys.length || !cfg.model) return toast('请先在「数据与备份」里填 API Key 和模型');
   const topic = currentTopic();
   if (!topic) return toast('请先填写本节考点主题');
   const btn = document.querySelector('[data-act="ai-points"]');
+  const ctx = aiModalCtx();
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
   try {
     const { text, kIdx } = await aiChat([
-      { role: 'system', content: '你是初中/高中化学老师，只输出 JSON 数组，不要解释。' },
-      { role: 'user', content: `请列出「${topic}」最常考的 6 个考点名称，每个 4–12 个字，简短、能直接当标签。只输出 JSON 字符串数组，例如 ["氧化还原本质","电子守恒配平"]。` },
+      { role: 'system', content: `你是${ctx.stage}${ctx.subject}老师，熟悉该学段教材与考纲，只输出 JSON 数组，不要解释。` },
+      { role: 'user', content: `学生年级：${ctx.stage}；学科：${ctx.subject}。请只按该学段要求，列出「${topic}」最常考的 6 个考点名称，每个 4–12 个字，简短、能直接当标签，不要出现超纲概念。只输出 JSON 字符串数组，例如 ["氧化还原本质","电子守恒配平"]。` },
     ], { maxTokens: 260, temperature: 0.3 });
     const m = text.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('格式异常');
@@ -770,12 +784,14 @@ function aiText(v) {
 const aiDetailInflight = {};
 
 function aiDetailPromise(label) {
-  if (aiDetailCache[label]) return Promise.resolve(aiDetailCache[label]);
-  if (aiDetailInflight[label]) return aiDetailInflight[label];
+  const ctx = aiModalCtx();
+  const ck = label + '|' + ctx.key;
+  if (aiDetailCache[ck]) return Promise.resolve(aiDetailCache[ck]);
+  if (aiDetailInflight[ck]) return aiDetailInflight[ck];
   const task = (async () => {
     const { text } = await aiChat([
-      { role: 'system', content: '你是资深初高中化学教师，讲解专业、准确，只输出 JSON。' },
-      { role: 'user', content: `针对考点「${label}」，面向中学生写课堂笔记内容：\n1) key：完整讲解 180–220 字，须包含定义或原理、规律或公式、典型反应（写化学方程式）以及适用条件或实验现象；\n2) wrong：常见易错点 50–70 字，说明学生最容易错在哪、正确做法是什么。\n只输出 JSON：{"key":"…","wrong":"…"}` },
+      { role: 'system', content: `你是资深${ctx.subject}教师，只输出 JSON。` },
+      { role: 'user', content: `学生年级：${ctx.stage}；学科：${ctx.subject}。请严格按该学段教材与考纲讲解，不要超纲。\n针对考点「${label}」，面向该年级学生写课堂笔记内容：\n1) key：完整讲解 180–220 字，须包含定义或原理、规律或公式、典型反应（写化学方程式）以及适用条件或实验现象；\n2) wrong：常见易错点 50–70 字，说明学生最容易错在哪、正确做法是什么。\n只输出 JSON：{"key":"…","wrong":"…"}` },
     ], { maxTokens: 900 });
     const m = text.match(/\{[\s\S]*\}/);
     let out = '';
@@ -787,11 +803,11 @@ function aiDetailPromise(label) {
       } catch (_) { }
     }
     if (!out) out = String(text).replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s*\n+\s*/g, '；').slice(0, 400);
-    aiDetailCache[label] = out;
+    aiDetailCache[ck] = out;
     return out;
   })();
-  aiDetailInflight[label] = task;
-  task.catch(() => { }).then(() => { delete aiDetailInflight[label]; });
+  aiDetailInflight[ck] = task;
+  task.catch(() => { }).then(() => { delete aiDetailInflight[ck]; });
   return task;
 }
 
@@ -2664,9 +2680,10 @@ function bind() {
       const old = t.textContent;
       t.disabled = true; t.textContent = '润色中…';
       try {
+        const ctx = aiModalCtx();
         const { text } = await aiChat([
-          { role: 'system', content: '你是资深中学教师，擅长把课堂反馈写得具体、专业、鼓励式。只输出润色后的正文，不要解释、不要引号。' },
-          { role: 'user', content: `把下面「${label}」润色到 80–150 字，保持事实不变，语言自然，不用夸张词：\n${cur}` },
+          { role: 'system', content: `你是${ctx.stage}${ctx.subject}老师，擅长把课堂反馈写得具体、专业、鼓励式。只输出润色后的正文，不要解释、不要引号。` },
+          { role: 'user', content: `学生年级：${ctx.stage}；学科：${ctx.subject}。请按该学段常用的教学表述润色下面「${label}」到 80–150 字，保持事实不变，语言自然，不用夸张词：\n${cur}` },
         ], { maxTokens: 400 });
         const out = String(text || '').trim().replace(/^["“']+|["”']+$/g, '');
         if (!out) toast('没有返回内容');
