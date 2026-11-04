@@ -1450,6 +1450,7 @@ function aiSystemPrompt() {
     '- 做学生报表时，必须写清数据范围（如「基于 2026-10-01 ~ 2026-11-03 的 6 条反馈」）和总课次。',
     '- 如果快照里没有用户问的学生，回答「没有找到该学生」并列出快照里最接近的几个姓名；不要虚构。',
     '- 回答用中文，结论在前、依据在后；数据不足就说不足；结尾给一条可执行建议。',
+    '- 重要：任何新增/修改必须通过 action 返回，由系统弹出确认卡；严禁在 reply 里直接说「已添加」「已创建」「已保存」等完成语句（除非本轮 action 已执行）。',
     '输出格式必须严格为单个 JSON 对象：{"reply":"给用户看的文字","action":{"type":"none"}}。不要输出 JSON 以外的任何内容。',
   ].join('\n');
 }
@@ -1735,8 +1736,11 @@ async function aiSend(text) {
       r.action = { type: 'none' };
       r.reply = (r.reply || '') + '\n\n⚠️ 该操作不在白名单（只支持查询、建课、导出），已拦截。';
     }
+    if (type === 'none' && /(已添加|已创建|添加成功|创建成功|已保存|已入库|已完成添加)/.test(r.reply || '')) {
+      r.reply = (r.reply || '') + '\n\n⚠️ 系统没有执行任何写入（我没有收到确认卡片）。请重新发送这条指令，并在弹出的确认卡上点「确认」。';
+    }
     const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
-    if (r.action && r.action.type === 'create_course') m.status = 'pending';
+    if (r.action && (r.action.type === 'create_course' || r.action.type === 'create_student')) m.status = 'pending';
     aiLog.push(m); saveAiLog();
     if (r.action && r.action.type === 'export') await aiExecute(m);
   } catch (e) {
