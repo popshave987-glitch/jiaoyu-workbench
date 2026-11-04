@@ -1659,6 +1659,16 @@ function aiScrollToLast(sel) {
   const cr = c.getBoundingClientRect(), er = el.getBoundingClientRect();
   c.scrollTop = c.scrollTop + (er.top - cr.top) - 8;
 }
+function aiRefreshChat() {
+  const box = document.getElementById('aiChat');
+  if (!box) return false;
+  const cur = aiCur();
+  if (cur) aiLog = cur.msgs;
+  box.innerHTML = aiRenderMsgs();
+  aiBusyUi();
+  return true;
+}
+
 function aiStickBottom() {
   aiScrollBottom();
   setTimeout(aiScrollBottom, 80);
@@ -1957,8 +1967,8 @@ async function aiSend(text) {
   const ph = { role: 'a', text: '思考中…', status: 'loading' };
   log.push(ph);
   saveSession(sid);
-  if (current === 'ai') {
-    render(); aiBusyUi();
+  if (current === 'ai' && aiActive === sid) {
+    aiRefreshChat();
     setTimeout(() => aiScrollToLast('.ai-b-u'), 20);
     aiStickBottom();
   }
@@ -2007,8 +2017,8 @@ async function aiSend(text) {
     aiPending.delete(sid);
     aiAttach = null;
     saveSession(sid);
-    if (current === 'ai') {
-      render(); aiBusyUi();
+    if (current === 'ai' && aiActive === sid) {
+      aiRefreshChat();
       setTimeout(() => aiScrollToLast('.ai-b-a'), 20);
       setTimeout(aiScrollBottom, 300);
     }
