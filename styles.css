@@ -433,3 +433,7 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
   .ai-edit label.wide{grid-column:auto}
   .ai-b{max-width:96%}
 }
+
+/* 底部导航：线性图标 */
+.tabbar a .ti svg{width:22px;height:22px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar a.tab-center .ti svg{width:20px;height:20px;stroke:#fff}

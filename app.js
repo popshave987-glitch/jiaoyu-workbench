@@ -300,6 +300,7 @@ function render() {
   document.getElementById('view').innerHTML = v;
   const fabPages = ['students', 'courses', 'contacts', 'assessments', 'plans'];
   document.getElementById('fab').style.display = fabPages.includes(current) ? 'block' : 'none';
+  if (current === 'ai') aiBusyUi();
 }
 
 /* ---------------- 首页 ---------------- */
@@ -339,7 +340,7 @@ function studentCard(s, compact) {
   };
   const att = S.courses.filter(x => (x.sids || []).includes(s.id) && String(x.date || '') <= today()).length;
   const hasToday = S.courses.some(x => (x.sids || []).includes(s.id) && x.date === today());
-  return `<div class="card">
+  return `<div class="card tap" data-act="edit-student" data-id="${s.id}">
     <div class="card-head">
       <div class="avatar">${esc(initials(s.name))}</div>
       <div style="flex:1;min-width:0">
@@ -675,7 +676,7 @@ async function aiChat(messages, opt) {
           if (opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           opt.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
         }
-        const timer = setTimeout(() => ctrl.abort(), 25000);
+        const timer = setTimeout(() => ctrl.abort(), 18000);
         try {
           const body = {
             model,
@@ -693,7 +694,7 @@ async function aiChat(messages, opt) {
           });
           clearTimeout(timer);
           if (!res.ok) {
-            if ((res.status === 429 || res.status >= 500) && attempt < 2) { await sleep(1200 * (attempt + 1)); continue; }
+            if ((res.status === 429 || res.status >= 500) && attempt < 1) { await sleep(1200 * (attempt + 1)); continue; }
             let detail = '';
             try {
               const eb = await res.json();
@@ -704,13 +705,17 @@ async function aiChat(messages, opt) {
           }
           const data = await res.json();
           const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-          if (!text) { errs.push('Key' + (i + 1) + ':空'); break; }
+          if (!text) {
+            const em = (data && data.error && (data.error.message || data.error.code)) || '返回为空';
+            errs.push('Key' + (i + 1) + ':' + String(em).slice(0, 30));
+            break;
+          }
           aiPreferred = { key: cfg.keys[i], model };
           return { text, kIdx: i, model };
         } catch (e) {
           clearTimeout(timer);
           if (userAborted()) throw new Error('已停止');
-          if (e.name === 'AbortError' && attempt < 2) { await sleep(800); continue; }
+          if (e.name === 'AbortError' && attempt < 1) { await sleep(800); continue; }
           errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域')); break;
         }
       }
@@ -1400,8 +1405,7 @@ const AI_MAX_MSGS = 30;
 let aiSessions = [];
 let aiActive = '';
 let aiLog = [];
-let aiBusy = false;
-let aiAbort = null;
+const aiPending = new Map();  // 会话 id -> AbortController
 let aiAttach = null;   // {kind:'image'|'text', dataUrl?, text?, name}
 
 function aiSessionNew() {
@@ -1429,6 +1433,16 @@ function loadAiLog() {
     aiActive = sorted[0].id;
   }
   aiLog = aiCur().msgs;
+}
+function saveSession(sid) {
+  const s = aiSessions.find(x => x.id === sid);
+  if (!s) return;
+  s.msgs = s.msgs.slice(-AI_MAX_MSGS);
+  s.updated = Date.now();
+  s.title = aiTitleOf(s.msgs);
+  aiSessions.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  while (aiSessions.length > AI_MAX_SESSIONS) aiSessions.pop();
+  try { localStorage.setItem(AI_SESSIONS_KEY, JSON.stringify(aiSessions)); } catch (_) { }
 }
 function saveAiLog() {
   const s = aiCur();
@@ -1570,8 +1584,9 @@ function aiParse(text) {
   return { reply: t || '模型这次没有返回文字，请再发送一次。', action: { type: 'none' } };
 }
 
-async function aiRun(text, signal, imageDataUrl) {
-  const history = aiLog.filter(m => m.role !== 'sys').slice(-6).map(m => ({
+async function aiRun(text, signal, imageDataUrl, log) {
+  const src = Array.isArray(log) ? log : aiLog;
+  const history = src.filter(m => m.role !== 'sys' && m.status !== 'loading').slice(-6).map(m => ({
     role: m.role === 'u' ? 'user' : 'assistant', content: m.text,
   }));
   const messages = [
@@ -1605,6 +1620,7 @@ function aiPrettyUser(t) {
 function aiRenderMsgs() {
   return aiLog.map((m, i) => {
     if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(aiPrettyUser(m.text)).replace(/\n/g, '<br>')}</div>`;
+    if (m.status === 'loading') return `<div class="ai-b ai-b-a ai-thinking">思考中…</div>`;
     let extra = '';
     if (m.action && m.action.type === 'create_student' && m.status === 'pending') {
       const a = m.action.args || {};
@@ -1646,7 +1662,7 @@ function aiRenderMsgs() {
 }
 
 function viewAi() {
-  loadAiLog();
+  if (!aiSessions.length) loadAiLog();
   return `
     <div class="card ai-card">
       <div class="ai-head">
@@ -1754,7 +1770,8 @@ function aiCourseConflict(a) {
   if (same.length) return `学生姓名重名：${same.join('、')}，请手动创建并指定具体学生`;
   return '';
 }
-function aiBusyUi(on) {
+function aiBusyUi() {
+  const on = aiPending.has(aiActive);
   const btn = document.querySelector('[data-act="ai-send"]');
   if (btn) {
     btn.disabled = false;
@@ -1763,7 +1780,7 @@ function aiBusyUi(on) {
   }
   document.querySelectorAll('.ai-chips .chip').forEach(b => { b.disabled = !!on; });
   const inp = document.getElementById('aiInput');
-  if (inp) inp.disabled = !!on;
+  if (inp) inp.disabled = false;   // 不锁输入框，避免切页后状态错乱
 }
 
 const AI_IMG_EXT = ['png', 'jpg', 'jpeg', 'webp', 'heic', 'gif'];
@@ -1835,7 +1852,9 @@ async function aiPickFile(file) {
 }
 
 async function aiSend(text) {
-  if (!aiReady()) return toast('请先在「数据与备份」里填写 API Key 和模型');
+  const sess = aiCur();
+  if (!sess) return;
+  const sid = sess.id, log = sess.msgs;
   let q = String(text || '').trim();
   if (aiAttach && aiAttach.kind === 'text') {
     q = (q || '请分析这个文件内容') + '\n\n【文件 ' + aiAttach.name + '】\n' + aiAttach.text;
@@ -1845,48 +1864,51 @@ async function aiSend(text) {
   const raw = String(text || '').trim();
   const shown = (raw || (aiAttach ? '（未输入文字）' : '（图片）')) +
     (aiAttach ? `\n[${aiAttach.kind === 'image' ? '图片' : '文件'}：${aiAttach.name}]` : '');
-  if (aiBusy) return;
+  if (aiPending.has(sid)) return toast('这个对话正在回答中');
   const blocked = aiBlockedWord(q);
   if (blocked) {
-    aiLog.push({ role: 'u', text: q });
-    aiLog.push({ role: 'a', text: `为避免误操作，「${blocked}」这类操作不在 AI 里执行。\n请到对应页面手动删除（删除前会二次确认），谢谢。` });
-    saveAiLog(); render();
+    log.push({ role: 'u', text: q });
+    log.push({ role: 'a', text: `为避免误操作，「${blocked}」这类操作不在 AI 里执行。\n请到对应页面手动删除（删除前会二次确认），谢谢。` });
+    saveSession(sid);
+    if (aiActive === sid) render();
     return;
   }
-  aiLog.push({ role: 'u', text: shown });
-  saveAiLog(); render();
-  setTimeout(aiScrollBottom, 20);
-  const box = document.getElementById('aiChat');
-  if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
-  aiBusy = true;
-  aiAbort = new AbortController();
-  aiBusyUi(true);
+  log.push({ role: 'u', text: shown });
+  const ph = { role: 'a', text: '思考中…', status: 'loading' };
+  log.push(ph);
+  saveSession(sid);
+  if (aiActive === sid) { render(); aiBusyUi(); setTimeout(aiScrollBottom, 20); }
+
+  const ctrl = new AbortController();
+  aiPending.set(sid, ctrl);
+  aiBusyUi();
   try {
-    const r = await aiRun(q, aiAbort.signal, img);
+    const r = await aiRun(q, ctrl.signal, img, log);
     const ALLOWED = ['none', 'create_course', 'create_student', 'export'];
     const type = (r.action && r.action.type) || 'none';
     if (!ALLOWED.includes(type)) {
       r.action = { type: 'none' };
-      r.reply = (r.reply || '') + '\n\n⚠️ 该操作不在白名单（只支持查询、建课、导出），已拦截。';
+      r.reply = (r.reply || '') + '\n\n⚠️ 该操作不在白名单（只支持查询、建课、建学生、导出），已拦截。';
     }
     if (type === 'none' && /(已添加|已创建|添加成功|创建成功|已保存|已入库|已完成添加)/.test(r.reply || '')) {
       r.reply = (r.reply || '') + '\n\n⚠️ 系统没有执行任何写入（我没有收到确认卡片）。请重新发送这条指令，并在弹出的确认卡上点「确认」。';
     }
-    const m = { role: 'a', text: r.reply || '（没有内容）', action: r.action };
-    if (r.action && (r.action.type === 'create_course' || r.action.type === 'create_student')) m.status = 'pending';
-    aiLog.push(m); saveAiLog();
-    if (r.action && r.action.type === 'export') await aiExecute(m);
+    ph.text = r.reply || '（没有内容）';
+    ph.action = r.action;
+    delete ph.status;
+    if (r.action && (r.action.type === 'create_course' || r.action.type === 'create_student')) ph.status = 'pending';
+    if (r.action && r.action.type === 'export') await aiExecute(ph);
   } catch (e) {
-    if (String(e.message || e) === '已停止') toast('已停止');
-    else aiLog.push({ role: 'a', text: '出错了：' + (e.message || e) });
+    const msg = String(e.message || e);
+    ph.text = msg === '已停止' ? '已停止' : ('出错了：' + msg);
+    delete ph.status; delete ph.action;
+    if (msg === '已停止') toast('已停止');
+  } finally {
+    aiPending.delete(sid);
+    aiAttach = null;
+    saveSession(sid);
+    if (aiActive === sid) { render(); aiBusyUi(); aiScrollBottom(); setTimeout(aiScrollBottom, 30); }
   }
-  aiBusy = false;
-  aiAbort = null;
-  aiAttach = null;
-  saveAiLog(); render();
-  aiBusyUi(false);
-  setTimeout(aiScrollBottom, 30);
-  setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
 }
 
 /* ---------------- 数据统计 ---------------- */
@@ -2799,10 +2821,8 @@ function bind() {
       return;
     }
     if (act === 'ai-send') {
-      if (aiBusy) {
-        try { if (aiAbort) aiAbort.abort(); } catch (_) { }
-        return;
-      }
+      const cur = aiPending.get(aiActive);
+      if (cur) { try { cur.abort(); } catch (_) { } return; }
       const inp = document.getElementById('aiInput');
       aiSend(inp ? inp.value : '');
       if (inp) inp.value = '';
@@ -3085,6 +3105,7 @@ function route() {
 /* ---------------- 启动 ---------------- */
 (async function boot() {
   await loadAll();
+  try { loadAiLog(); } catch (_) { }
   KEYS.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
 
   // 记录为空但本机有自动备份 → 询问恢复
