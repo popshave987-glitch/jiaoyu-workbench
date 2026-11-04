@@ -1528,6 +1528,8 @@ function aiSystemPrompt() {
     '1) {"type":"none"} 只回答问题/分析数据。',
     '2) {"type":"create_course","args":{"name":"课程名","subject":"化学","date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","students":["姓名",...]}} 新建课程（系统会先请用户确认）。',
     '3) {"type":"create_student","args":{"name":"姓名","cls":"班级（如 高二1班）","grade":"年级（可选）","school":"学校（可选）","phone":"手机号（可选，不校验格式）","status":"在读/已结课（可选）","note":"备注（可选）"}} 新建学生（系统先请用户确认，并自动查重）。',
+    '- 新建学生：只要用户给了姓名，就必须直接返回 create_student 确认卡，班级/年级/学校/电话缺失就留空，由用户在卡上补全；禁止先反问要信息。只有连姓名都没给时，才简短追问姓名。',
+    '- 新建课程：只要用户给了课程名或明确主题（如“周三晚辅”），就直接返回 create_course 确认卡；日期/时间缺失可用今天、08:00–17:00，学生缺失留空，由用户在卡上修改。',
     '4) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
     '导出列必须在白名单内：',
     JSON.stringify(AI_COLUMNS),
@@ -1602,6 +1604,22 @@ function aiParse(text) {
   }
   // 没有可解析 JSON：如果原文一段话，正常显示
   return { reply: t || '模型这次没有返回文字，请再发送一次。', action: { type: 'none' } };
+}
+
+function aiIntentStudent(q) {
+  const t = String(q || '');
+  if (!/(新建|添加|创建|录入|加个|加一个)/.test(t) || !/学生/.test(t)) return null;
+  const g = (t.match(/初[一二三]|高[一二三]/) || [])[0] || '';
+  const cls = (t.match(/(初[一二三]|高[一二三])\s*[0-9一二三四五六七八九十]+\s*班/) || [])[0] || g;
+  let name = '';
+  const m1 = t.match(/(?:叫|名为|名字是|姓名是)\s*([\u4e00-\u9fa5]{2,4})/);
+  if (m1) name = m1[1];
+  if (!name) {
+    const m2 = t.match(/学生\s*([\u4e00-\u9fa5]{2,4})/);
+    if (m2) name = m2[1];
+  }
+  if (!name) return null;
+  return { type: 'create_student', args: { name, cls, grade: g } };
 }
 
 async function aiRun(text, signal, imageDataUrl, log) {
@@ -1916,6 +1934,13 @@ async function aiSend(text) {
   aiBusyUi();
   try {
     const r = await aiRun(q, ctrl.signal, img, log);
+    if ((!r.action || r.action.type === 'none') && /(提供|补充|需要更多|请告诉|请确认|是否)/.test(r.reply || '')) {
+      const guess = aiIntentStudent(q);
+      if (guess) {
+        r.action = guess;
+        r.reply = `我已按现有信息整理好学生资料（${guess.args.name}），缺的字段可以在下面补。`;
+      }
+    }
     const ALLOWED = ['none', 'create_course', 'create_student', 'export'];
     const type = (r.action && r.action.type) || 'none';
     if (!ALLOWED.includes(type)) {
