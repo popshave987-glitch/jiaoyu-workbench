@@ -1734,7 +1734,9 @@ async function aiSend(text) {
   if (!q && !aiAttach) return;
   if (aiAttach && aiAttach.kind === 'image' && !confirm('将把这张图片发送给智谱用于识别，是否继续？')) return;
   const img = aiAttach && aiAttach.kind === 'image' ? aiAttach.dataUrl : null;
-  const shown = (q || '（图片）').slice(0, 400) + (img ? '\n[附件图片]' : '');
+  const raw = String(text || '').trim();
+  const shown = (raw || (aiAttach ? '（未输入文字）' : '（图片）')) +
+    (aiAttach ? `\n[${aiAttach.kind === 'image' ? '图片' : '文件'}：${aiAttach.name}]` : '');
   if (aiBusy) return;
   const blocked = aiBlockedWord(q);
   if (blocked) {
