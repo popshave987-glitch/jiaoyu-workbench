@@ -1327,24 +1327,64 @@ ${items}
 }
 
 /* ---------------- AI 助手（白名单动作，仅本机数据） ---------------- */
-const AI_CHAT_KEY = 'ai_assistant_chat_v1';
+const AI_SESSIONS_KEY = 'ai_sessions_v1';
+const AI_CHAT_KEY = 'ai_assistant_chat_v1';   // 旧版单会话，用于升级迁移
 const AI_COLUMNS = {
   students: ['姓名', '班级', '年级', '学校', '状态', '家长', '电话', '备注'],
   courses: ['日期', '课程', '科目', '开始', '结束', '学生数', '已反馈', '备注'],
   feedbacks: ['日期', '学生', '班级', '科目', '评价', '考点', '课堂表现', '进步点', '需加强', '默写'],
 };
+const AI_MAX_SESSIONS = 20;
+const AI_MAX_MSGS = 30;
+let aiSessions = [];
+let aiActive = '';
 let aiLog = [];
 let aiBusy = false;
 let aiAbort = null;
 let aiAttach = null;   // {kind:'image'|'text', dataUrl?, text?, name}
-let aiPending = null;
 
+function aiSessionNew() {
+  return { id: 's_' + Date.now() + '_' + Math.floor(Math.random() * 900 + 100), title: '新对话', created: Date.now(), updated: Date.now(), msgs: [] };
+}
+function aiCur() { return aiSessions.find(x => x.id === aiActive) || null; }
+function aiTitleOf(msgs) {
+  const m = (msgs || []).find(x => x.role === 'u');
+  const t = m ? String(m.text).split('\n')[0].replace(/\s+/g, ' ').slice(0, 18) : '';
+  return t || '新对话';
+}
 function loadAiLog() {
-  try { aiLog = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || '[]'); } catch (_) { aiLog = []; }
-  if (!Array.isArray(aiLog)) aiLog = [];
+  let arr = [];
+  try { arr = JSON.parse(localStorage.getItem(AI_SESSIONS_KEY) || '[]'); } catch (_) { arr = []; }
+  aiSessions = (Array.isArray(arr) ? arr : []).filter(x => x && Array.isArray(x.msgs));
+  if (!aiSessions.length) {
+    let legacy = [];
+    try { legacy = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || '[]'); } catch (_) { legacy = []; }
+    const s = aiSessionNew();
+    if (Array.isArray(legacy) && legacy.length) { s.msgs = legacy.slice(-AI_MAX_MSGS); s.title = aiTitleOf(legacy); }
+    aiSessions = [s];
+  }
+  if (!aiActive || !aiSessions.some(x => x.id === aiActive)) {
+    const sorted = aiSessions.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    aiActive = sorted[0].id;
+  }
+  aiLog = aiCur().msgs;
 }
 function saveAiLog() {
-  try { localStorage.setItem(AI_CHAT_KEY, JSON.stringify(aiLog.slice(-30))); } catch (_) { }
+  const s = aiCur();
+  if (!s) return;
+  s.msgs = aiLog.slice(-AI_MAX_MSGS);
+  s.updated = Date.now();
+  s.title = aiTitleOf(s.msgs);
+  aiSessions.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  while (aiSessions.length > AI_MAX_SESSIONS) aiSessions.pop();
+  try { localStorage.setItem(AI_SESSIONS_KEY, JSON.stringify(aiSessions)); } catch (_) { }
+}
+function aiSwitchSession(id) {
+  if (!aiSessions.some(x => x.id === id)) return;
+  aiActive = id;
+  aiLog = aiCur().msgs;
+  aiAttach = null;
+  render();
 }
 
 function aiSnapshot(question) {
@@ -1464,6 +1504,12 @@ function viewAi() {
           <button class="btn sm" data-act="ai-new">新开对话</button>
           <button class="btn sm danger" data-act="ai-del">删除对话</button>
         </div>
+      </div>
+      <div class="ai-sess">
+        <select id="aiSession">
+          ${aiSessions.map(s => `<option value="${s.id}" ${s.id === aiActive ? 'selected' : ''}>${esc(s.title)} · ${new Date(s.updated || s.created || 0).toLocaleDateString('zh-CN')}</option>`).join('')}
+        </select>
+        <span class="meta">共 ${aiSessions.length} 个对话</span>
       </div>
       <div class="meta">可以问数据、让我帮你建课程、按需导出定制表格（导出会进「下载管理」）。只能调用白名单功能，不会改代码，数据只走你配置的智谱接口。对话仅存本机，点右上角可随时清理。</div>
       <div class="ai-chat" id="aiChat">${aiRenderMsgs() || '<div class="ai-b ai-b-a">你好，我是她的助手。可以问我：这周谁没上课？本月反馈写完没？把 10 月的反馈导成表格。</div>'}</div>
@@ -2442,6 +2488,7 @@ function bind() {
   document.addEventListener('change', async (e) => {
     if (e.target.id === 'statSid') { statSid = e.target.value; render(); return; }
     const id = e.target.id;
+    if (e.target.id === 'aiSession') { aiSwitchSession(e.target.value); return; }
     if (e.target.id === 'aiFile') {
       const f = e.target.files && e.target.files[0];
       e.target.value = '';
@@ -2528,20 +2575,25 @@ function bind() {
     }
     if (act === 'ai-unattach') { aiAttach = null; render(); return; }
     if (act === 'ai-new') {
-      if (aiLog.length && !confirm('新开对话？当前对话内容会被清空。')) return;
-      aiLog = [];
+      const s = aiSessionNew();
+      aiSessions.unshift(s);
+      aiActive = s.id;
+      aiLog = s.msgs;
       aiAttach = null;
       saveAiLog(); render();
-      toast('已新开对话');
+      toast('已新开对话（原对话已保留）');
       return;
     }
     if (act === 'ai-del') {
-      if (!confirm('删除全部对话记录？删除后不可恢复。')) return;
-      aiLog = [];
+      if (!confirm('删除当前这个对话？删除后不可恢复。')) return;
+      aiSessions = aiSessions.filter(x => x.id !== aiActive);
+      if (!aiSessions.length) aiSessions = [aiSessionNew()];
+      aiActive = aiSessions[0].id;
+      aiLog = aiCur().msgs;
       aiAttach = null;
-      try { localStorage.removeItem(AI_CHAT_KEY); } catch (_) { }
+      try { localStorage.setItem(AI_SESSIONS_KEY, JSON.stringify(aiSessions)); } catch (_) { }
       render();
-      toast('对话记录已删除');
+      toast('已删除当前对话');
       return;
     }
     if (act === 'ai-send') {

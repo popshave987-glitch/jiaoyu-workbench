@@ -377,3 +377,6 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .ai-attach-chip button{border:0;background:transparent;color:#0E7490;font-size:14px;line-height:1;cursor:pointer}
 .ai-preview{margin:4px 0 6px}
 .ai-preview img{max-height:120px;max-width:60%;border-radius:8px;border:1px solid #E2E8F0;object-fit:contain}
+
+.ai-sess{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
+.ai-sess select{flex:1;min-width:0;padding:6px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12.5px;background:#fff}
