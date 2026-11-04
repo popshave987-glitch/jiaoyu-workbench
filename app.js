@@ -1461,7 +1461,7 @@ function fmtKB(n) { return (n / 1024).toFixed(1) + ' KB'; }
 function saveSession(sid) {
   const s = aiSessions.find(x => x.id === sid);
   if (!s) return;
-  s.msgs = s.msgs.slice(-AI_MAX_MSGS);
+  if (s.msgs.length > AI_MAX_MSGS) s.msgs.splice(0, s.msgs.length - AI_MAX_MSGS);
   s.updated = Date.now();
   s.title = aiTitleOf(s.msgs);
   aiSessions.sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -1471,7 +1471,8 @@ function saveSession(sid) {
 function saveAiLog() {
   const s = aiCur();
   if (!s) return;
-  s.msgs = aiLog.slice(-AI_MAX_MSGS);
+  s.msgs = aiLog;
+  if (s.msgs.length > AI_MAX_MSGS) s.msgs.splice(0, s.msgs.length - AI_MAX_MSGS);
   s.updated = Date.now();
   s.title = aiTitleOf(s.msgs);
   aiSessions.sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -1725,6 +1726,7 @@ function aiRecoverStale() {
 }
 function viewAi() {
   if (!aiSessions.length || !aiCur()) loadAiLog();
+  if (aiCur()) aiLog = aiCur().msgs;
   aiRecoverStale();
   return `
     <div class="card ai-card">
@@ -1988,7 +1990,7 @@ async function aiSend(text) {
     aiPending.delete(sid);
     aiAttach = null;
     saveSession(sid);
-    if (aiActive === sid) { render(); aiBusyUi(); aiScrollBottom(); setTimeout(aiScrollBottom, 30); }
+    if (current === 'ai') { render(); aiBusyUi(); aiScrollBottom(); setTimeout(aiScrollBottom, 30); }
   }
 }
 

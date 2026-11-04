@@ -356,7 +356,7 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 
 /* AI 助手 */
 .ai-card{margin-bottom:12px}
-.ai-chat{max-height:340px;overflow-y:auto;overflow-x:hidden;padding:6px 2px 10px;display:flex;flex-direction:column;gap:10px}
+.ai-chat{max-height:min(58vh,520px);overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:6px 2px 10px;display:flex;flex-direction:column;gap:10px}
 .ai-b{max-width:92%;padding:9px 12px;border-radius:14px;font-size:12.5px;line-height:1.7;
   overflow-wrap:anywhere;word-break:break-word;white-space:normal;box-sizing:border-box}
 .ai-b-u{align-self:flex-end;text-align:left;background:#028090;color:#fff;border-bottom-right-radius:6px}
