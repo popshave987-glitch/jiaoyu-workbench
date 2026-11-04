@@ -1424,9 +1424,13 @@ function loadAiLog() {
   let arr = [];
   try { arr = JSON.parse(localStorage.getItem(AI_SESSIONS_KEY) || '[]'); } catch (_) { arr = []; }
   aiSessions = (Array.isArray(arr) ? arr : []).filter(x => x && Array.isArray(x.msgs)).map(x => {
-    x.msgs = x.msgs.map(m => (m && m.status === 'loading')
-      ? { role: 'a', text: '上次回答被中断了，点重试可继续。', status: 'error', retry: m.retry || '' }
-      : m);
+    x.msgs = x.msgs.map((m, i) => {
+      const prev = x.msgs[i - 1];
+      const q = m && m.retry ? m.retry : (prev && prev.role === 'u' ? prev.text : '');
+      if (m && m.status === 'loading') return { role: 'a', text: '上次回答被中断了，点重试可继续。', status: 'error', retry: q };
+      if (m && m.status === 'error' && !m.retry && q) m.retry = q;
+      return m;
+    });
     return x;
   });
   if (!aiSessions.length) {
@@ -1703,8 +1707,25 @@ function aiRenderMsgs() {
   }).join('');
 }
 
+function aiRecoverStale() {
+  const cur = aiCur();
+  if (!cur) return;
+  const ctrl = aiPending.get(aiActive);
+  if (ctrl && ctrl.signal && ctrl.signal.aborted) aiPending.delete(aiActive);
+  if (aiPending.has(aiActive)) return;
+  const list = cur.msgs || [];
+  list.forEach((m, i) => {
+    if (m && m.status === 'loading') {
+      m.status = 'error';
+      m.text = '上次回答中断了，点重试可继续。';
+      const prev = list[i - 1];
+      m.retry = prev && prev.role === 'u' ? prev.text : '';
+    }
+  });
+}
 function viewAi() {
   if (!aiSessions.length) loadAiLog();
+  aiRecoverStale();
   return `
     <div class="card ai-card">
       <div class="ai-head">
@@ -2885,9 +2906,13 @@ function bind() {
     }
     if (act === 'ai-send') {
       const cur = aiPending.get(aiActive);
-      if (cur) { try { cur.abort(); } catch (_) { } return; }
+      if (cur) {
+        toast('这个对话正在回答中：可点「停止」中断后再发');
+        return;
+      }
       const inp = document.getElementById('aiInput');
-      aiSend(inp ? inp.value : '');
+      const val = inp ? inp.value : '';
+      aiSend(val);
       if (inp) inp.value = '';
       return;
     }
