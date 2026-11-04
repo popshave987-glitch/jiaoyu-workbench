@@ -1651,6 +1651,19 @@ function aiScrollBottom() {
   const c = document.getElementById('aiChat');
   if (c) c.scrollTop = c.scrollHeight;
 }
+function aiScrollToLast(sel) {
+  const c = document.getElementById('aiChat');
+  if (!c) return;
+  const el = [...c.querySelectorAll(sel)].pop();
+  if (!el) return aiScrollBottom();
+  const cr = c.getBoundingClientRect(), er = el.getBoundingClientRect();
+  c.scrollTop = c.scrollTop + (er.top - cr.top) - 8;
+}
+function aiStickBottom() {
+  aiScrollBottom();
+  setTimeout(aiScrollBottom, 80);
+  setTimeout(aiScrollBottom, 250);
+}
 
 function aiPrettyUser(t) {
   let x = String(t || '');
@@ -1944,7 +1957,11 @@ async function aiSend(text) {
   const ph = { role: 'a', text: '思考中…', status: 'loading' };
   log.push(ph);
   saveSession(sid);
-  if (aiActive === sid) { render(); aiBusyUi(); setTimeout(aiScrollBottom, 20); }
+  if (current === 'ai') {
+    render(); aiBusyUi();
+    setTimeout(() => aiScrollToLast('.ai-b-u'), 20);
+    aiStickBottom();
+  }
 
   const ctrl = new AbortController();
   aiPending.set(sid, ctrl);
@@ -1990,7 +2007,11 @@ async function aiSend(text) {
     aiPending.delete(sid);
     aiAttach = null;
     saveSession(sid);
-    if (current === 'ai') { render(); aiBusyUi(); aiScrollBottom(); setTimeout(aiScrollBottom, 30); }
+    if (current === 'ai') {
+      render(); aiBusyUi();
+      setTimeout(() => aiScrollToLast('.ai-b-a'), 20);
+      setTimeout(aiScrollBottom, 300);
+    }
   }
 }
 
@@ -2686,6 +2707,10 @@ function bind() {
     document.getElementById('scrim').classList.add('show');
   };
   document.getElementById('scrim').onclick = closeDrawer;
+  const stick = () => { if (current === 'ai') { setTimeout(aiScrollBottom, 80); setTimeout(aiScrollBottom, 240); } };
+  document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'aiInput') stick(); });
+  window.addEventListener('resize', stick);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', stick);
   document.getElementById('exportBtn').onclick = () => { location.hash = '#/data'; };
   document.getElementById('fab').onclick = () => {
     if (current === 'courses') {
