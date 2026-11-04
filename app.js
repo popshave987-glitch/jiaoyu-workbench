@@ -663,7 +663,7 @@ async function aiChat(messages, opt) {
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
   const models = opt.model ? [opt.model] : [cfg.model];
   const startAt = Date.now();
-  const BUDGET = 9000;   // 整体最多 9 秒，避免多 Key/多模型叠加等待
+  const BUDGET = 60000;   // 整体最多 60 秒
   const keyOrder = cfg.keys.map((k, i) => i);
   if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
   if (!opt.model && aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
@@ -678,7 +678,7 @@ async function aiChat(messages, opt) {
           if (opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           opt.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
         }
-        const remain = Math.max(1000, Math.min(8000, BUDGET - (Date.now() - startAt)));
+        const remain = Math.max(5000, Math.min(30000, BUDGET - (Date.now() - startAt)));
         const timer = setTimeout(() => ctrl.abort(), remain);
         try {
           const body = {
@@ -697,7 +697,7 @@ async function aiChat(messages, opt) {
           });
           clearTimeout(timer);
           if (!res.ok) {
-            if ((res.status === 429 || res.status >= 500) && attempt < 0) { await sleep(1200 * (attempt + 1)); continue; }
+            if ((res.status === 429 || res.status >= 500) && attempt < 1) { await sleep(1200 * (attempt + 1)); continue; }
             let detail = '';
             try {
               const eb = await res.json();
@@ -718,8 +718,8 @@ async function aiChat(messages, opt) {
         } catch (e) {
           clearTimeout(timer);
           if (userAborted()) throw new Error('已停止');
-          if (e.name === 'AbortError' && attempt < 0) { await sleep(800); continue; }
-          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '8 秒无响应，已中断' : '网络错误/跨域失败')); break;
+          if (e.name === 'AbortError' && attempt < 1) { await sleep(800); continue; }
+          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '30 秒无响应，已中断' : '网络错误/跨域失败')); break;
         }
       }
     }
@@ -1906,6 +1906,13 @@ async function aiSend(text) {
 
   const ctrl = new AbortController();
   aiPending.set(sid, ctrl);
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    if (aiActive === sid) {
+      const el = document.querySelector('.ai-thinking');
+      if (el) el.textContent = '思考中…（' + Math.round((Date.now() - t0) / 1000) + ' 秒）';
+    }
+  }, 1000);
   aiBusyUi();
   try {
     const r = await aiRun(q, ctrl.signal, img, log);
@@ -1930,6 +1937,7 @@ async function aiSend(text) {
     if (msg !== '已停止') { ph.status = 'error'; ph.retry = q; }
     if (msg === '已停止') toast('已停止');
   } finally {
+    clearInterval(tick);
     aiPending.delete(sid);
     aiAttach = null;
     saveSession(sid);
@@ -2867,13 +2875,20 @@ function bind() {
     }
     if (act === 'ai-chip') return aiSend(t.dataset.q);
     if (act === 'ai-retry') {
+      const sess = aiCur();
+      if (!sess) return;
+      const list = sess.msgs;
       const i = +t.dataset.idx;
-      const m = aiLog[i];
-      if (!m || !m.retry) return;
+      const m = list[i];
+      if (!m || !m.retry) return toast('这条消息没有可重试的内容');
       const q = m.retry;
-      aiLog.splice(i, 1);
-      if (aiLog[i - 1] && aiLog[i - 1].role === 'u') aiLog.splice(i - 1, 1);
-      saveAiLog(); render();
+      list.splice(i, 1);
+      if (list[i - 1] && list[i - 1].role === 'u') list.splice(i - 1, 1);
+      saveSession(sess.id);
+      const old = aiPending.get(sess.id);
+      if (old) { try { old.abort(); } catch (_) { } aiPending.delete(sess.id); }
+      if (aiActive === sess.id) render();
+      toast('正在重试…');
       aiSend(q);
       return;
     }
