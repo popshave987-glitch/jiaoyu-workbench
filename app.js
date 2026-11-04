@@ -2575,6 +2575,7 @@ function bind() {
     }
     if (act === 'ai-unattach') { aiAttach = null; render(); return; }
     if (act === 'ai-new') {
+      if (!aiLog.length) return;   // 当前对话没有内容，不重复新开
       const s = aiSessionNew();
       aiSessions.unshift(s);
       aiActive = s.id;
