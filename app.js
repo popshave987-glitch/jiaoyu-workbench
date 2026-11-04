@@ -2300,13 +2300,6 @@ function viewData() {
       <input type="file" id="importFile" accept="application/json,.json" style="width:100%">
       <div class="tip" style="margin-top:6px;font-size:12px;color:#64748B">选择之前导出的 JSON，会覆盖当前数据。</div>
     </div>
-    <div class="card">
-      <h3 style="margin-top:0">其他</h3>
-      <div class="btns">
-        <button class="btn" data-act="print">打印当前页</button>
-        <button class="btn danger" data-act="clear-all">清空全部数据</button>
-      </div>
-    </div>
     <div class="notice blue">
       两端同步办法：手机「导出 JSON」→ 微信发给自己 → 电脑「导入 / 恢复」。或反过来。一周同步一次就够。
     </div>
@@ -3125,12 +3118,6 @@ function bind() {
       writeBackup();
       return toast('已导出备份');
     }
-    if (act === 'clear-all') {
-      if (!confirm('清空全部数据且不可恢复，确定？')) return;
-      KEYS.forEach(k => S[k] = []);
-      try { localStorage.removeItem(LS_KEY); } catch (_) { }
-      await Promise.all(KEYS.map(saveKey)); render(); return toast('已清空');
-    }
     if (act === 'clear-chats') {
       if (!confirm('清空全部 AI 聊天记录？删除后不可恢复。')) return;
       aiSessions = []; aiActive = '';
@@ -3154,7 +3141,6 @@ function bind() {
       render();
       return toast('已从自动备份恢复');
     }
-    if (act === 'print') return window.print();
   });
 }
 
