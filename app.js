@@ -665,7 +665,7 @@ async function aiChat(messages, opt) {
           const body = {
             model,
             temperature: opt.temperature != null ? opt.temperature : 0.2,
-            max_tokens: opt.maxTokens || 900,
+            max_tokens: opt.model ? Math.min(opt.maxTokens || 900, 1024) : (opt.maxTokens || 900),
             messages,
           };
           // glm-4v-flash 等视觉模型不支持 thinking 参数，带上会返回 400
