@@ -437,3 +437,7 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 /* 底部导航：线性图标 */
 .tabbar a .ti svg{width:22px;height:22px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tabbar a.tab-center .ti svg{width:20px;height:20px;stroke:#fff}
+
+/* AI 错误气泡 */
+.ai-error{background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA}
+.ai-error .btns{margin-top:6px}

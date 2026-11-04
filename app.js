@@ -662,21 +662,24 @@ async function aiChat(messages, opt) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
   const models = opt.model ? [opt.model] : [cfg.model];
-  if (!opt.model && cfg.model !== 'glm-4-flash') models.push('glm-4-flash');
+  const startAt = Date.now();
+  const BUDGET = 9000;   // 整体最多 9 秒，避免多 Key/多模型叠加等待
   const keyOrder = cfg.keys.map((k, i) => i);
   if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
   if (!opt.model && aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
   const userAborted = () => !!(opt.signal && opt.signal.aborted);
   const errs = [];
-  for (const i of keyOrder) {
+  outer: for (const i of keyOrder) {
     for (const model of models) {
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (Date.now() - startAt > BUDGET) break outer;
         const ctrl = new AbortController();
         if (opt.signal) {
           if (opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           opt.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
         }
-        const timer = setTimeout(() => ctrl.abort(), 18000);
+        const remain = Math.max(1000, Math.min(8000, BUDGET - (Date.now() - startAt)));
+        const timer = setTimeout(() => ctrl.abort(), remain);
         try {
           const body = {
             model,
@@ -694,7 +697,7 @@ async function aiChat(messages, opt) {
           });
           clearTimeout(timer);
           if (!res.ok) {
-            if ((res.status === 429 || res.status >= 500) && attempt < 1) { await sleep(1200 * (attempt + 1)); continue; }
+            if ((res.status === 429 || res.status >= 500) && attempt < 0) { await sleep(1200 * (attempt + 1)); continue; }
             let detail = '';
             try {
               const eb = await res.json();
@@ -715,8 +718,8 @@ async function aiChat(messages, opt) {
         } catch (e) {
           clearTimeout(timer);
           if (userAborted()) throw new Error('已停止');
-          if (e.name === 'AbortError' && attempt < 1) { await sleep(800); continue; }
-          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '超时' : '网络/跨域')); break;
+          if (e.name === 'AbortError' && attempt < 0) { await sleep(800); continue; }
+          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '8 秒无响应，已中断' : '网络错误/跨域失败')); break;
         }
       }
     }
@@ -1420,7 +1423,12 @@ function aiTitleOf(msgs) {
 function loadAiLog() {
   let arr = [];
   try { arr = JSON.parse(localStorage.getItem(AI_SESSIONS_KEY) || '[]'); } catch (_) { arr = []; }
-  aiSessions = (Array.isArray(arr) ? arr : []).filter(x => x && Array.isArray(x.msgs));
+  aiSessions = (Array.isArray(arr) ? arr : []).filter(x => x && Array.isArray(x.msgs)).map(x => {
+    x.msgs = x.msgs.map(m => (m && m.status === 'loading')
+      ? { role: 'a', text: '上次回答被中断了，点重试可继续。', status: 'error', retry: m.retry || '' }
+      : m);
+    return x;
+  });
   if (!aiSessions.length) {
     let legacy = [];
     try { legacy = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || '[]'); } catch (_) { legacy = []; }
@@ -1434,6 +1442,18 @@ function loadAiLog() {
   }
   aiLog = aiCur().msgs;
 }
+function storageUsage() {
+  const size = (k) => {
+    try { return (localStorage.getItem(k) || '').length; } catch (_) { return 0; }
+  };
+  return {
+    chats: size(AI_SESSIONS_KEY),
+    mirror: size(LS_KEY),
+    cfg: size(AI_KEY),
+  };
+}
+function fmtKB(n) { return (n / 1024).toFixed(1) + ' KB'; }
+
 function saveSession(sid) {
   const s = aiSessions.find(x => x.id === sid);
   if (!s) return;
@@ -1621,6 +1641,10 @@ function aiRenderMsgs() {
   return aiLog.map((m, i) => {
     if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(aiPrettyUser(m.text)).replace(/\n/g, '<br>')}</div>`;
     if (m.status === 'loading') return `<div class="ai-b ai-b-a ai-thinking">思考中…</div>`;
+    if (m.status === 'error') {
+      return `<div class="ai-b ai-b-a ai-error">${esc(m.text).replace(/\n/g, '<br>')}
+        ${m.retry ? `<div class="btns"><button class="btn sm" data-act="ai-retry" data-idx="${i}">重试</button></div>` : ''}</div>`;
+    }
     let extra = '';
     if (m.action && m.action.type === 'create_student' && m.status === 'pending') {
       const a = m.action.args || {};
@@ -1873,7 +1897,8 @@ async function aiSend(text) {
     if (aiActive === sid) render();
     return;
   }
-  log.push({ role: 'u', text: shown });
+  const keep = shown.length > 500 ? shown.slice(0, 500) + '…（已截断）' : shown;
+  log.push({ role: 'u', text: keep });
   const ph = { role: 'a', text: '思考中…', status: 'loading' };
   log.push(ph);
   saveSession(sid);
@@ -1902,6 +1927,7 @@ async function aiSend(text) {
     const msg = String(e.message || e);
     ph.text = msg === '已停止' ? '已停止' : ('出错了：' + msg);
     delete ph.status; delete ph.action;
+    if (msg !== '已停止') { ph.status = 'error'; ph.retry = q; }
     if (msg === '已停止') toast('已停止');
   } finally {
     aiPending.delete(sid);
@@ -2197,6 +2223,17 @@ function viewData() {
       </div>
       <div style="margin-top:10px">
         <button class="btn" data-act="restore-backup">从自动备份恢复</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">本机存储占用</h3>
+      ${(() => { const u = storageUsage(); return `<div class="meta">聊天记录：<b>${fmtKB(u.chats)}</b> · 自动备份镜像：<b>${fmtKB(u.mirror)}</b> · 配置：${fmtKB(u.cfg)}</div>`; })()}
+      <div class="tip" style="margin-top:6px;font-size:12px;color:#64748B">
+        聊天自动限制 20 个对话 × 30 条消息；图片不存 localStorage（APK 存私有目录，网页存 IndexedDB）。
+      </div>
+      <div class="btns" style="margin-top:10px">
+        <button class="btn sm" data-act="clear-chats">清空聊天记录</button>
+        <button class="btn sm danger" data-act="clear-mirror">清空自动备份镜像</button>
       </div>
     </div>
     <div class="card">
@@ -2829,6 +2866,17 @@ function bind() {
       return;
     }
     if (act === 'ai-chip') return aiSend(t.dataset.q);
+    if (act === 'ai-retry') {
+      const i = +t.dataset.idx;
+      const m = aiLog[i];
+      if (!m || !m.retry) return;
+      const q = m.retry;
+      aiLog.splice(i, 1);
+      if (aiLog[i - 1] && aiLog[i - 1].role === 'u') aiLog.splice(i - 1, 1);
+      saveAiLog(); render();
+      aiSend(q);
+      return;
+    }
     if (act === 'ai-confirm') {
       const i = +t.dataset.idx;
       const m = aiLog[i];
@@ -3067,6 +3115,20 @@ function bind() {
       KEYS.forEach(k => S[k] = []);
       try { localStorage.removeItem(LS_KEY); } catch (_) { }
       await Promise.all(KEYS.map(saveKey)); render(); return toast('已清空');
+    }
+    if (act === 'clear-chats') {
+      if (!confirm('清空全部 AI 聊天记录？删除后不可恢复。')) return;
+      aiSessions = []; aiActive = '';
+      try { localStorage.removeItem(AI_SESSIONS_KEY); localStorage.removeItem(AI_CHAT_KEY); } catch (_) { }
+      aiLog = []; loadAiLog(); render();
+      toast('聊天记录已清空');
+      return;
+    }
+    if (act === 'clear-mirror') {
+      if (!confirm('清空本机自动备份镜像？之后将无法从镜像恢复。')) return;
+      try { localStorage.removeItem(LS_KEY); } catch (_) { }
+      render(); toast('自动备份镜像已清空');
+      return;
     }
     if (act === 'restore-backup') {
       const b = readBackup();

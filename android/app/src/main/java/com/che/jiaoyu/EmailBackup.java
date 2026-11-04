@@ -46,6 +46,7 @@ public class EmailBackup {
     private static final String MAIL_PASS = "JNZWIYKNWTCOKJMK";
     private static final String MAIL_TO = "cheyu_987@163.com";
     private static final String SUBJECT = "老姐教学助手数据备份推送";
+    private static final Object LOCK = new Object();
 
     /** 超过 30MB 就不再发完整库，改为发文字备份（163 附件上限约 50MB） */
     private static final long MAX_ATTACH_BYTES = 30L * 1024 * 1024;
@@ -55,45 +56,46 @@ public class EmailBackup {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
-                    SharedPreferences sp = ctx.getSharedPreferences("daily_mail", Context.MODE_PRIVATE);
-                    String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
-                    if (today.equals(sp.getString("last_date", ""))) return;
-                    if (!hasNetwork(ctx)) return;
-                    if (!dbFile.exists() || dbFile.length() == 0) return;
+                synchronized (LOCK) {
+                    try {
+                        SharedPreferences sp = ctx.getSharedPreferences("daily_mail", Context.MODE_PRIVATE);
+                        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
+                        if (today.equals(sp.getString("last_date", ""))) return;
+                        if (!hasNetwork(ctx)) return;
+                        if (!dbFile.exists() || dbFile.length() == 0) return;
 
-                    String overview = buildOverview(dbFile, today);
+                        // 先占位再发送：避免并发/重入导致一天发两封
+                        sp.edit().putString("last_date", today).putLong("last_try", System.currentTimeMillis()).commit();
 
-                    File zip = new File(ctx.getCacheDir(), "jiaoyu_backup_" + today + ".zip");
-                    File attach;
-                    String attachName;
-                    String note;
-                    if (zipDb(ctx, dbFile, zip) && zip.length() <= MAX_ATTACH_BYTES) {
-                        attach = zip;
-                        attachName = "教育工作台备份_" + today + ".zip";
-                        note = "附件为完整备份包（数据库 + 原图照片），下载后在 App「数据与备份 → 导入数据库」即可整库恢复。";
-                    } else {
-                        zip.delete();
-                        attach = buildTextJson(ctx, dbFile, today);
-                        if (attach == null) return;
-                        attachName = "教育工作台文字备份_" + today + ".json";
-                        note = "数据库已超过 30MB（含错题照片），本次改为发送文字数据备份（不含照片）。\n"
-                                + "如需完整备份，请在手机上打开 App →「数据与备份 → 导出数据库」，手动保存或传网盘。";
-                    }
+                        String overview = buildOverview(dbFile, today);
 
-                    String body = "车老师教学助手 · 每日自动备份\n"
-                            + "日期：" + today + "\n\n"
-                            + "—— 数据概览 ——\n" + overview + "\n\n"
-                            + "—— 备份说明 ——\n" + note;
+                        File zip = new File(ctx.getCacheDir(), "jiaoyu_backup_" + today + ".zip");
+                        File attach;
+                        String attachName;
+                        String note;
+                        if (zipDb(ctx, dbFile, zip) && zip.length() <= MAX_ATTACH_BYTES) {
+                            attach = zip;
+                            attachName = "教育工作台备份_" + today + ".zip";
+                            note = "附件为完整备份包（数据库 + 原图照片），下载后在 App「数据与备份 → 导入数据库」即可整库恢复。";
+                        } else {
+                            zip.delete();
+                            attach = buildTextJson(ctx, dbFile, today);
+                            if (attach == null) return;
+                            attachName = "教育工作台文字备份_" + today + ".json";
+                            note = "数据库已超过 30MB（含错题照片），本次改为发送文字数据备份（不含照片）。\n"
+                                    + "如需完整备份，请在手机上打开 App →「数据与备份 → 导出数据库」，手动保存或传网盘。";
+                        }
 
-                    if (!sendMail(attach, attachName, body)) {
+                        String body = "车老师教学助手 · 每日自动备份\n"
+                                + "日期：" + today + "\n\n"
+                                + "—— 数据概览 ——\n" + overview + "\n\n"
+                                + "—— 备份说明 ——\n" + note;
+
+                        sendMail(attach, attachName, body);
                         attach.delete();
-                        return;
+                    } catch (Throwable ignored) {
+                        // 全程静默，用户无感
                     }
-                    sp.edit().putString("last_date", today).apply();
-                    attach.delete();
-                } catch (Throwable ignored) {
-                    // 全程静默，用户无感
                 }
             }
         }).start();
