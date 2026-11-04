@@ -719,6 +719,12 @@ async function aiChat(messages, opt) {
   throw new Error([...new Set(errs)].slice(0, 4).join(' / ') || '未知错误');
 }
 
+function sval(v) {
+  if (v === null || v === undefined) return '';
+  const t = String(v).trim();
+  return /^(null|undefined|nil)$/i.test(t) ? '' : t;
+}
+
 function aiModalCtx() {
   const m = document.getElementById('modal');
   const sid = (m && m.querySelector('select[name="sid"]') || {}).value || '';
@@ -1532,6 +1538,7 @@ function aiNormalizeAction(o) {
   if (act.type && alias[act.type]) act.type = alias[act.type];
   if (!act.args) act.args = o.args || {};
   const A = act.args;
+  Object.keys(A).forEach(k => { A[k] = sval(A[k]); });
   if (A.class && !A.cls) A.cls = A.class;
   if (A.mobile && !A.phone) A.phone = A.mobile;
   if (A.tel && !A.phone) A.phone = A.tel;
@@ -1605,14 +1612,14 @@ function aiRenderMsgs() {
       <div class="ai-confirm">
         <div class="ai-confirm-t">将新建学生（可直接修改）</div>
         <div class="ai-edit">
-          <label>姓名<input data-f="name" value="${esc(a.name || '')}"></label>
-          <label>班级<input data-f="cls" value="${esc(a.cls || '')}" placeholder="如 高二1班"></label>
-          <label>年级<input data-f="grade" value="${esc(a.grade || '')}"></label>
-          <label>学校<input data-f="school" value="${esc(a.school || '')}"></label>
-          <label>手机<input data-f="phone" value="${esc(a.phone || '')}"></label>
-          <label>备注<input data-f="note" value="${esc(a.note || '')}"></label>
+          <label>姓名<input data-f="name" value="${esc(sval(a.name))}" placeholder="必填"></label>
+          <label>班级<input data-f="cls" value="${esc(sval(a.cls))}" placeholder="如 高二1班"></label>
+          <label>年级<input data-f="grade" value="${esc(sval(a.grade))}" placeholder="如 高一"></label>
+          <label>学校<input data-f="school" value="${esc(sval(a.school))}" placeholder="可空"></label>
+          <label>手机<input data-f="phone" value="${esc(sval(a.phone))}" placeholder="可空"></label>
+          <label>备注<input data-f="note" value="${esc(sval(a.note))}" placeholder="可空"></label>
         </div>
-        <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.cls || '未填班级')} · ${esc(a.grade || '')}<br>${esc(a.school || '')} ${esc(a.phone ? '· ' + a.phone : '')}</div>
+        <div class="ai-confirm-d">${esc([sval(a.name), sval(a.cls) || '未填班级', sval(a.grade)].filter(Boolean).join(' · '))}${(sval(a.school) || sval(a.phone)) ? '<br>' + esc([sval(a.school), sval(a.phone)].filter(Boolean).join(' · ')) : ''}</div>
         <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认添加</button>
         <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
       </div></div>`;
@@ -1622,12 +1629,12 @@ function aiRenderMsgs() {
       extra = `<div class="ai-confirm">
         <div class="ai-confirm-t">将新建课程（可直接修改）</div>
         <div class="ai-edit">
-          <label>课程名<input data-f="name" value="${esc(a.name || '')}"></label>
-          <label>科目<input data-f="subject" value="${esc(a.subject || '化学')}"></label>
-          <label>日期<input data-f="date" type="date" value="${esc(a.date || '')}"></label>
-          <label>开始<input data-f="start" value="${esc(a.start || '')}" placeholder="HH:mm"></label>
-          <label>结束<input data-f="end" value="${esc(a.end || '')}" placeholder="HH:mm"></label>
-          <label class="wide">学生<input data-f="students" value="${esc((a.students || []).join('、'))}" placeholder="多人用、分隔"></label>
+          <label>课程名<input data-f="name" value="${esc(sval(a.name))}" placeholder="必填"></label>
+          <label>科目<input data-f="subject" value="${esc(sval(a.subject) || '化学')}"></label>
+          <label>日期<input data-f="date" type="date" value="${esc(sval(a.date))}"></label>
+          <label>开始<input data-f="start" value="${esc(sval(a.start))}" placeholder="HH:mm"></label>
+          <label>结束<input data-f="end" value="${esc(sval(a.end))}" placeholder="HH:mm"></label>
+          <label class="wide">学生<input data-f="students" value="${esc((a.students || []).map(sval).filter(Boolean).join('、'))}" placeholder="多人用、分隔"></label>
         </div>
         <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.subject || '化学')} · ${esc(a.date || '')} ${esc(a.start || '')}-${esc(a.end || '')}<br>学生：${esc((a.students || []).join('、') || '')}</div>
         <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认创建</button>

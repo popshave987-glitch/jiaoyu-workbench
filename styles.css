@@ -384,9 +384,9 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 
 /* 确认卡可编辑 */
 .ai-edit{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
-.ai-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#64748B}
+.ai-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#64748B;min-width:0}
 .ai-edit label.wide{grid-column:1 / -1}
-.ai-edit input{padding:5px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12.5px;color:#0F172A;background:#fff}
+.ai-edit input{width:100%;min-width:0;box-sizing:border-box;padding:5px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12.5px;color:#0F172A;background:#fff}
 
 
 
