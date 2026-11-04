@@ -721,7 +721,7 @@ async function aiGeneratePoints() {
     if (!m) throw new Error('格式异常');
     const arr = JSON.parse(m[0]);
     if (!Array.isArray(arr) || !arr.length) throw new Error('返回为空');
-    pointBuf = arr.slice(0, 8).map(t => ({ t: String(t).slice(0, 16), on: false, busy: false }));
+    pointBuf = arr.slice(0, 8).map(t => ({ t: aiText(t).slice(0, 16), on: false, busy: false }));
     renderPointChips();
     prefetchPointDetails();
     toast('已生成 ' + pointBuf.length + ' 个考点（Key' + (kIdx + 1) + '），点选后自动写详细笔记');
@@ -736,6 +736,21 @@ async function aiGeneratePoints() {
     }
   }
   if (btn) { btn.disabled = false; btn.textContent = 'AI 生成考点'; }
+}
+
+function aiText(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) return v.map(aiText).filter(Boolean).join('；');
+  if (typeof v === 'object') {
+    for (const k of ['text', 'content', 'note', 'value', 'detail', 'key', 'point', 'desc', 'description']) {
+      const t = aiText(v[k]);
+      if (t) return t;
+    }
+    return Object.values(v).map(aiText).filter(Boolean).join('；');
+  }
+  return String(v);
 }
 
 const aiDetailInflight = {};
@@ -753,7 +768,8 @@ function aiDetailPromise(label) {
     if (m) {
       try {
         const o = JSON.parse(m[0]);
-        out = [o.key && ('要点：' + String(o.key).trim()), o.wrong && ('易错：' + String(o.wrong).trim())].filter(Boolean).join('；');
+        const k = aiText(o.key), w = aiText(o.wrong);
+        out = [k && ('要点：' + k), w && ('易错：' + w)].filter(Boolean).join('；');
       } catch (_) { }
     }
     if (!out) out = String(text).replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s*\n+\s*/g, '；').slice(0, 400);
