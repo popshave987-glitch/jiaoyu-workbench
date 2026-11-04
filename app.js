@@ -1509,10 +1509,23 @@ function aiParse(text) {
   if (a >= 0 && b > a) {
     try {
       const o = JSON.parse(t.slice(a, b + 1));
-      return { reply: String(o.reply || ''), action: o.action || { type: 'none' } };
+      const alias = {
+        add_student: 'create_student', new_student: 'create_student', create_students: 'create_student',
+        add_course: 'create_course', new_course: 'create_course', create_class: 'create_course',
+      };
+      let act = o.action;
+      if (!act && o.type && o.type !== 'none') act = { type: o.type, args: o.args || {} };
+      if (typeof act === 'string') act = { type: act, args: o.args || {} };
+      if (!act || typeof act !== 'object') act = { type: 'none' };
+      if (act.type && alias[act.type]) act.type = alias[act.type];
+      if (!act.args) act.args = o.args || {};
+      let reply = String(o.reply || o.message || o.answer || o.content || '').trim();
+      if (!reply && act.type !== 'none') reply = '我整理好了信息，请在下面确认或修改后提交。';
+      if (!reply) reply = '模型这次没有返回文字，请再发送一次。';
+      return { reply, action: act };
     } catch (_) { }
   }
-  return { reply: t, action: { type: 'none' } };
+  return { reply: t || '模型这次没有返回文字，请再发送一次。', action: { type: 'none' } };
 }
 
 async function aiRun(text, signal, imageDataUrl) {
