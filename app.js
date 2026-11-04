@@ -292,11 +292,19 @@ function formData(root) {
 /* ---------------- 渲染分发 ---------------- */
 function render() {
   renderNav();
-  const v = ({
-    home: viewHome, students: viewStudents, contacts: viewContacts,
-    assessments: viewAssessments,
-    plans: viewPlans, courses: viewCourses, ai: viewAi, stats: viewStats, exports: viewExports, data: viewData,
-  }[current] || viewHome)();
+  let v = '';
+  try {
+    v = ({
+      home: viewHome, students: viewStudents, contacts: viewContacts,
+      assessments: viewAssessments,
+      plans: viewPlans, courses: viewCourses, ai: viewAi, stats: viewStats, exports: viewExports, data: viewData,
+    }[current] || viewHome)();
+  } catch (e) {
+    v = `<div class="card"><h3>页面渲染出错</h3>
+      <div class="meta">${esc((e && e.message) || e)}</div>
+      <div class="btns"><button class="btn sm" data-act="fix-ai-data">清理异常聊天并进入 AI</button>
+      <button class="btn sm" data-act="go-home">返回首页</button></div></div>`;
+  }
   document.getElementById('view').innerHTML = v;
   const fabPages = ['students', 'courses', 'contacts', 'assessments', 'plans'];
   document.getElementById('fab').style.display = fabPages.includes(current) ? 'block' : 'none';
@@ -1685,6 +1693,13 @@ function aiPrettyUser(t) {
 
 function aiRenderMsgs() {
   return aiLog.map((m, i) => {
+    try { return aiRenderOne(m, i); }
+    catch (e) { return `<div class="ai-b ai-b-a ai-error">这条消息显示失败：${esc((e && e.message) || e)}</div>`; }
+  }).join('');
+}
+
+function aiRenderOne(m, i) {
+
     if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(aiPrettyUser(m.text)).replace(/\n/g, '<br>')}</div>`;
     if (m.status === 'loading') return `<div class="ai-b ai-b-a ai-thinking">思考中…</div>`;
     if (m.status === 'error') {
@@ -1720,15 +1735,14 @@ function aiRenderMsgs() {
           <label>日期<input data-f="date" type="date" value="${esc(sval(a.date))}"></label>
           <label>开始<input data-f="start" value="${esc(sval(a.start))}" placeholder="HH:mm"></label>
           <label>结束<input data-f="end" value="${esc(sval(a.end))}" placeholder="HH:mm"></label>
-          <label class="wide">学生<input data-f="students" value="${esc((a.students || []).map(sval).filter(Boolean).join('、'))}" placeholder="多人用、分隔"></label>
+          <label class="wide">学生<input data-f="students" value="${esc((Array.isArray(a.students) ? a.students.map(sval).filter(Boolean) : String(sval(a.students) || '').split(/[、,，]/).map(x => x.trim()).filter(Boolean)).join('、'))}" placeholder="多人用、分隔"></label>
         </div>
-        <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.subject || '化学')} · ${esc(a.date || '')} ${esc(a.start || '')}-${esc(a.end || '')}<br>学生：${esc((a.students || []).join('、') || '')}</div>
+        <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.subject || '化学')} · ${esc(a.date || '')} ${esc(a.start || '')}-${esc(a.end || '')}<br>学生：${esc((Array.isArray(a.students) ? a.students.map(sval).filter(Boolean) : String(sval(a.students) || '').split(/[、,，]/).map(x => x.trim()).filter(Boolean)).join('、'))}</div>
         <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认创建</button>
         <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
       </div>`;
     }
     return `<div class="ai-b ai-b-a">${esc(m.text).replace(/\n/g, '<br>')}${extra}</div>`;
-  }).join('');
 }
 
 function aiRecoverStale() {
@@ -2956,6 +2970,16 @@ function bind() {
       return;
     }
     if (act === 'ai-chip') return aiSend(t.dataset.q);
+    if (act === 'fix-ai-data') {
+      aiSessions = []; aiActive = ''; aiLog = [];
+      try { localStorage.removeItem(AI_SESSIONS_KEY); } catch (_) { }
+      loadAiLog();
+      location.hash = '#/ai';
+      render();
+      toast('已清理异常聊天记录');
+      return;
+    }
+    if (act === 'go-home') { location.hash = '#/'; render(); return; }
     if (act === 'ai-retry') {
       const sess = aiCur();
       if (!sess) return;
