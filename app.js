@@ -201,14 +201,15 @@ function textarea(name, val, ph) {
 }
 
 /* 长文本输入：多行、限长、AI 润色 / 还原原文 */
-function aiField(label, name, val, ph, max) {
+function aiField(label, name, val, ph, max, mode) {
   const n = max || 600;
+  const gen = mode === 'gen';
   return `<div class="aif" data-aif="${name}">
     <textarea name="${name}" maxlength="${n}" placeholder="${esc(ph || '')}" style="min-height:96px">${esc(val || '')}</textarea>
     <div class="aif-bar">
       <span class="aif-cnt">最多 ${n} 字</span>
       <span class="spacer"></span>
-      <button type="button" class="btn sm" data-act="ai-polish" data-name="${name}" data-label="${esc(label)}">AI 润色</button>
+      <button type="button" class="btn sm" data-act="ai-polish" data-name="${name}" data-label="${esc(label)}" data-mode="${gen ? 'gen' : 'polish'}">${gen ? 'AI 出题' : 'AI 润色'}</button>
       <button type="button" class="btn sm" data-act="ai-restore" data-name="${name}" disabled>还原</button>
     </div>
   </div>`;
@@ -869,7 +870,7 @@ function formFeedback(f) {
       </div><div class="rt" id="notesEditor" contenteditable="true" data-ph="点 AI 生成考点，或手动写本节内容…"></div>
       <input type="hidden" name="notes" value="">`, '支持加粗、项目符号；手动改过也能按行删除考点') +
     field('课堂表现', aiField('课堂表现', 'performance', f.performance, '专注听讲、主动提问、后半段注意力下降等', 600)) +
-    field('课后作业', aiField('课后作业', 'homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式', 600)) +
+    field('课后作业', aiField('课后作业', 'homework', f.homework || f.task, '写作业要求，如：三个化学方程式，难度适中', 600, 'gen'), '写要求后点「AI 出题」，会按学生年级和科目生成具体题目与答案') +
     field('进步点', aiField('进步点', 'progress', f.progress || f.good, '如：方程式配平正确率明显提高，能独立分析步骤', 600)) +
     field('需要加强点', aiField('需要加强点', 'weak', f.weak, '如：装置气密性检查的表述仍不完整', 600)) +
     field('默写检查情况', aiField('默写检查情况', 'dictation', f.dictation, '化学式默写 8/10，错 H₂CO₃、Fe(OH)₃', 500)) +
@@ -2895,14 +2896,19 @@ function bind() {
       if (!ta.dataset.original) ta.dataset.original = ta.value;
       const max = +ta.getAttribute('maxlength') || 600;
       const label = t.dataset.label || '内容';
+      const gen = t.dataset.mode === 'gen';
       const old = t.textContent;
-      t.disabled = true; t.textContent = '润色中…';
+      t.disabled = true; t.textContent = gen ? '出题中…' : '润色中…';
       try {
         const ctx = aiModalCtx();
-        const { text } = await aiChat([
+        const reqMsgs = gen ? [
+          { role: 'system', content: `你是${ctx.stage}${ctx.subject}老师，熟悉该学段教材与考纲，作业难度必须匹配该年级。只输出作业正文，不要解释、不要客套。` },
+          { role: 'user', content: `学生年级：${ctx.stage}；学科：${ctx.subject}。请严格按下面要求布置本次课后作业：\n「${cur}」\n\n要求：\n1) 题量与题型按用户描述（如“三个化学方程式”就出 3 道方程式题）；\n2) 难度适中，符合该学段；\n3) 每题给出题干，并在下一行用「答案：」给出答案；\n4) 不要超纲，不要出与要求无关的内容。` },
+        ] : [
           { role: 'system', content: `你是${ctx.stage}${ctx.subject}老师，擅长把课堂反馈写得具体、专业、鼓励式。只输出润色后的正文，不要解释、不要引号。` },
           { role: 'user', content: `学生年级：${ctx.stage}；学科：${ctx.subject}。请按该学段常用的教学表述润色下面「${label}」到 80–150 字，保持事实不变，语言自然，不用夸张词：\n${cur}` },
-        ], { maxTokens: 400 });
+        ];
+        const { text } = await aiChat(reqMsgs, gen ? { maxTokens: 800, temperature: 0.4 } : { maxTokens: 400 });
         const out = String(text || '').trim().replace(/^["“']+|["”']+$/g, '');
         if (!out) toast('没有返回内容');
         else {
