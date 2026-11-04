@@ -427,7 +427,7 @@ function formStudent(s) {
       ${field('家长称呼', input('parent', s.parent, '如 李妈妈'))}
     </div>
     ${field('家长电话', input('phone', s.phone, '手机号', 'tel'))}
-    ${field('备注', textarea('note', s.note, '薄弱点、上课时间、目标分…'))}`;
+    ${field('备注', aiField('学生备注', 'note', s.note, '薄弱点、上课时间、目标分…', 600))}`;
 }
 
 /* ---------------- 沟通 ---------------- */
@@ -509,9 +509,9 @@ function formAssessment(a) {
       ${field('满分', input('total', a.total, '100', 'number'))}
     </div>` +
     field('测评日期', input('date', a.date || today(), '', 'date')) +
-    field('优势', textarea('strong', a.strong, '化学用语、基础实验操作…')) +
-    field('薄弱', textarea('weak', a.weak, '溶解度曲线、实验探究…')) +
-    field('阶段目标', textarea('goal', a.goal, '2 个月内把探究题得分率提到 60%'));
+    field('优势', aiField('优势', 'strong', a.strong, '化学用语、基础实验操作…', 600)) +
+    field('薄弱', aiField('薄弱', 'weak', a.weak, '溶解度曲线、实验探究…', 600)) +
+    field('阶段目标', aiField('阶段目标', 'goal', a.goal, '2 个月内把探究题得分率提到 60%', 300));
 }
 function assessText(a) {
   const st = studentById(a.sid);
@@ -1134,7 +1134,7 @@ function formCourse(c) {
       ${field('开始时间', input('start', c.start || DEFAULT_TIMES.start, '', 'time'))}
       ${field('结束时间', input('end', c.end || DEFAULT_TIMES.end, '', 'time'))}
     </div>
-    ${field('备注', textarea('note', c.note, '本节进度、注意事项…'))}
+    ${field('备注', aiField('课程备注', 'note', c.note, '本节进度、注意事项…', 600))}
     ${field('选择学生', `<input id="pickQ" placeholder="搜索姓名 / 班级" oninput="filterPick(this.value)" autocomplete="off">
       <div class="pick-list" id="pickList">${pickList || '<div class="empty">还没有学生，先去学生管理添加</div>'}</div>`, '勾选本次课参加的学生')}`;
 }
