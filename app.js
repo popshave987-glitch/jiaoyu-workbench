@@ -671,7 +671,7 @@ async function aiChat(messages, opt) {
   const codeMsg = (c) => c === 401 ? 'Key无效或未实名' : c === 403 ? '无权限' : c === 429 ? '模型繁忙' : c >= 500 ? '服务异常' : String(c);
   const models = opt.model ? [opt.model] : [cfg.model];
   const startAt = Date.now();
-  const BUDGET = 60000;   // 整体最多 60 秒
+  const BUDGET = 30000;   // 整体最多 30 秒
   const keyOrder = cfg.keys.map((k, i) => i);
   if (aiPreferred.key) keyOrder.sort((a, b) => (cfg.keys[a] === aiPreferred.key ? -1 : 0) - (cfg.keys[b] === aiPreferred.key ? -1 : 0));
   if (!opt.model && aiPreferred.model) models.sort((a, b) => (b === aiPreferred.model ? 1 : 0) - (a === aiPreferred.model ? 1 : 0));
@@ -686,7 +686,7 @@ async function aiChat(messages, opt) {
           if (opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           opt.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
         }
-        const remain = Math.max(5000, Math.min(30000, BUDGET - (Date.now() - startAt)));
+        const remain = Math.max(5000, Math.min(25000, BUDGET - (Date.now() - startAt)));
         const timer = setTimeout(() => ctrl.abort(), remain);
         try {
           const body = {
@@ -705,7 +705,7 @@ async function aiChat(messages, opt) {
           });
           clearTimeout(timer);
           if (!res.ok) {
-            if ((res.status === 429 || res.status >= 500) && attempt < 1) { await sleep(1200 * (attempt + 1)); continue; }
+            if ((res.status === 429 || res.status >= 500) && attempt < 0) { await sleep(1200 * (attempt + 1)); continue; }
             let detail = '';
             try {
               const eb = await res.json();
@@ -727,7 +727,9 @@ async function aiChat(messages, opt) {
           clearTimeout(timer);
           if (userAborted()) throw new Error('已停止');
           if (e.name === 'AbortError' && attempt < 1) { await sleep(800); continue; }
-          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '30 秒无响应，已中断' : '网络错误/跨域失败')); break;
+          errs.push('Key' + (i + 1) + ':' + (e.name === 'AbortError' ? '25 秒无响应，已中断' : '网络错误/跨域失败'));
+          if (e.name === 'AbortError') break outer;
+          break;
         }
       }
     }
@@ -1637,7 +1639,7 @@ function aiIntentStudent(q) {
 
 async function aiRun(text, signal, imageDataUrl, log) {
   const src = Array.isArray(log) ? log : aiLog;
-  const history = src.filter(m => m.role !== 'sys' && m.status !== 'loading').slice(-6).map(m => ({
+  const history = src.filter(m => m.role !== 'sys' && m.status !== 'loading').slice(-4).map(m => ({
     role: m.role === 'u' ? 'user' : 'assistant', content: m.text,
   }));
   const messages = [
@@ -1649,7 +1651,7 @@ async function aiRun(text, signal, imageDataUrl, log) {
       : { role: 'user', content: text },
   ];
   const r = await aiChat(messages, {
-    temperature: 0.1, maxTokens: 1200, signal,
+    temperature: 0.1, maxTokens: 700, signal,
     model: imageDataUrl ? 'glm-4v-flash' : '',
   });
   return aiParse(r.text);
@@ -2731,6 +2733,9 @@ function bind() {
     document.getElementById('scrim').classList.add('show');
   };
   document.getElementById('scrim').onclick = closeDrawer;
+  document.querySelectorAll('.tabbar a').forEach(a => {
+    a.addEventListener('click', () => setTimeout(() => { try { route(); } catch (_) { } }, 0));
+  });
   const stick = () => { if (current === 'ai') { setTimeout(aiScrollBottom, 80); setTimeout(aiScrollBottom, 240); } };
   document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'aiInput') stick(); });
   window.addEventListener('resize', stick);
@@ -3270,7 +3275,12 @@ function markTabs() {
 }
 function route() {
   const h = (location.hash || '#/home').replace('#/', '');
+  const prev = current;
   current = NAV.some(n => n.id === h) ? h : 'home';
+  if (prev !== current) {
+    const v = document.getElementById('view');
+    if (v && current !== 'ai') v.innerHTML = '<div class="empty">正在打开…</div>';
+  }
   render();
   markTabs();
   closeDrawer();
