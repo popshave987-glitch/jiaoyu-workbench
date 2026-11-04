@@ -1502,29 +1502,64 @@ function aiSystemPrompt() {
   ].join('\n');
 }
 
+function aiJsonObjects(t) {
+  const out = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{') { if (depth === 0) start = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && start >= 0) { out.push(t.slice(start, i + 1)); start = -1; } }
+  }
+  return out;
+}
+
+function aiNormalizeAction(o) {
+  const alias = {
+    add_student: 'create_student', new_student: 'create_student', create_students: 'create_student',
+    add_course: 'create_course', new_course: 'create_course', create_class: 'create_course',
+  };
+  let act = o.action;
+  if (!act && o.type && o.type !== 'none') act = { type: o.type, args: o.args || {} };
+  if (typeof act === 'string') act = { type: act, args: o.args || {} };
+  if (!act || typeof act !== 'object') act = { type: 'none' };
+  if (act.type && alias[act.type]) act.type = alias[act.type];
+  if (!act.args) act.args = o.args || {};
+  const A = act.args;
+  if (A.class && !A.cls) A.cls = A.class;
+  if (A.mobile && !A.phone) A.phone = A.mobile;
+  if (A.tel && !A.phone) A.phone = A.tel;
+  return act;
+}
+
 function aiParse(text) {
   let t = String(text || '').trim();
   t = t.replace(/^```[a-z]*\n?/i, '').replace(/```$/,'').trim();
-  const a = t.indexOf('{'), b = t.lastIndexOf('}');
-  if (a >= 0 && b > a) {
+  const cands = aiJsonObjects(t);
+  let best = null, bestScore = -1;
+  for (const c of cands) {
     try {
-      const o = JSON.parse(t.slice(a, b + 1));
-      const alias = {
-        add_student: 'create_student', new_student: 'create_student', create_students: 'create_student',
-        add_course: 'create_course', new_course: 'create_course', create_class: 'create_course',
-      };
-      let act = o.action;
-      if (!act && o.type && o.type !== 'none') act = { type: o.type, args: o.args || {} };
-      if (typeof act === 'string') act = { type: act, args: o.args || {} };
-      if (!act || typeof act !== 'object') act = { type: 'none' };
-      if (act.type && alias[act.type]) act.type = alias[act.type];
-      if (!act.args) act.args = o.args || {};
+      const o = JSON.parse(c);
+      const act = aiNormalizeAction(o);
       let reply = String(o.reply || o.message || o.answer || o.content || '').trim();
-      if (!reply && act.type !== 'none') reply = '我整理好了信息，请在下面确认或修改后提交。';
-      if (!reply) reply = '模型这次没有返回文字，请再发送一次。';
-      return { reply, action: act };
+      const score = (act.type !== 'none' ? 2 : 0) + (reply ? 1 : 0);
+      if (score > bestScore) { bestScore = score; best = { o, act, reply }; }
+      if (score >= 2 && reply) break;
     } catch (_) { }
   }
+  if (best) {
+    let { act, reply } = best;
+    if (!reply && act.type !== 'none') reply = '我整理好了信息，请在下面确认或修改后提交。';
+    if (!reply) reply = '模型这次没有返回文字，请再发送一次。';
+    return { reply, action: act };
+  }
+  // 没有可解析 JSON：如果原文一段话，正常显示
   return { reply: t || '模型这次没有返回文字，请再发送一次。', action: { type: 'none' } };
 }
 
