@@ -428,7 +428,7 @@ function formStudent(s) {
       ${field('学校', combo('school', s.school, '如 实验中学', COMBO_SRC.school()))}
     </div>
     ${field('班级', combo('cls', s.cls, '如 九慧1班', COMBO_SRC.cls()), '导出反馈表按班级分 sheet，建议都填')}
-    ${field('科目', combo('subjects', s.subjects, '化学', COMBO_SRC.subject()), '填过科目会自动出现在下拉里')}
+    ${field('科目', combo('subjects', s.subjects || '化学', '化学', COMBO_SRC.subject()), '填过科目会自动出现在下拉里')}
     <div class="grid2">
       ${field('状态', `<select name="status">
         ${['在读', '重点', '薄弱', '已结课'].map(x => `<option ${s.status === x ? 'selected' : ''}>${x}</option>`).join('')}
@@ -510,7 +510,7 @@ function formAssessment(a) {
   a = a || {};
   return field('学生', `<select name="sid">${studentOptions(a.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', combo('subject', a.subject, '化学', COMBO_SRC.subject()))}
+      ${field('科目', combo('subject', a.subject || '化学', '化学', COMBO_SRC.subject()))}
       ${field('等级', `<select name="level">${['优秀', '一般', '薄弱'].map(x => `<option ${a.level === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
     </div>
     <div class="grid2">
@@ -854,7 +854,7 @@ function formFeedback(f) {
   return `<input type="hidden" name="courseId" value="${esc(f.courseId || '')}">` +
     field('学生姓名', `<select name="sid">${studentOptions(f.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', combo('subject', f.subject, '化学', COMBO_SRC.subject()))}
+      ${field('科目', combo('subject', f.subject || '化学', '化学', COMBO_SRC.subject()))}
       ${field('日期', input('date', f.date || today(), '', 'date'))}
     </div>` +
     field('本节考点', combo('topic', f.topic, '选过或输新的主题，再点 AI 生成', COMBO_SRC.topic()), '如 氧化还原反应 / 溶液与溶解度曲线') +
@@ -1050,7 +1050,7 @@ function formPlan(p) {
   const tasksText = (p.tasks || []).map(t => t.t).join('\n');
   return field('学生', `<select name="sid">${studentOptions(p.sid)}</select>`) +
     `<div class="grid2">
-      ${field('科目', combo('subject', p.subject, '化学', COMBO_SRC.subject()))}
+      ${field('科目', combo('subject', p.subject || '化学', '化学', COMBO_SRC.subject()))}
       ${field('结束日期', input('end', p.end, '', 'date'))}
     </div>` +
     field('阶段目标', aiField('阶段目标', 'goal', p.goal, '掌握几何证明、稳定在 80 分以上…', 300)) +
@@ -1167,7 +1167,7 @@ function formCourse(c) {
     </label>`).join('')).join('');
   return field('课程名称', input('name', c.name, '如 九慧1班 周三晚辅')) +
     `<div class="grid2">
-      ${field('科目', `<select name="subject">${COURSE_SUBJECTS.map(x => `<option ${c.subject === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
+      ${field('科目', `<select name="subject">${COURSE_SUBJECTS.map(x => `<option ${(c.subject || '化学') === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
       ${field('日期', input('date', c.date || today(), '', 'date'))}
     </div>
     <div class="grid2">
