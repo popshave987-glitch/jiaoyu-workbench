@@ -2919,12 +2919,19 @@ function closeDrawer() {
 }
 
 /* ---------------- 路由 ---------------- */
+function markTabs() {
+  document.querySelectorAll('#tabbar a').forEach(a => {
+    a.classList.toggle('active', a.dataset.tab === current);
+  });
+}
 function route() {
   const h = (location.hash || '#/home').replace('#/', '');
   current = NAV.some(n => n.id === h) ? h : 'home';
   render();
+  markTabs();
   closeDrawer();
   window.scrollTo(0, 0);
+  markTabs();
 }
 
 /* ---------------- 启动 ---------------- */

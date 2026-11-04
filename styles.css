@@ -386,3 +386,28 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .ai-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#64748B}
 .ai-edit label.wide{grid-column:1 / -1}
 .ai-edit input{padding:5px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12.5px;color:#0F172A;background:#fff}
+
+/* 底部导航（APK/手机） */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:none;
+  grid-template-columns:repeat(5,1fr);align-items:end;
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+  background:rgba(255,255,255,.92);backdrop-filter:blur(12px);
+  border-top:1px solid #E2E8F0;border-radius:18px 18px 0 0;
+  box-shadow:0 -6px 18px rgba(15,23,42,.08)}
+.tabbar a{display:flex;flex-direction:column;align-items:center;gap:2px;
+  text-decoration:none;color:#94A3B8;font-size:11px;padding:4px 0 2px;border-radius:12px}
+.tabbar a .ti{font-size:20px;line-height:1}
+.tabbar a.active{color:#028090}
+.tabbar a.tab-center{position:relative;top:-14px}
+.tabbar a.tab-center .ti{width:58px;height:58px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:26px;
+  background:linear-gradient(145deg,#0FA3B1,#028090);color:#fff;
+  box-shadow:0 8px 18px rgba(2,128,144,.35),inset 0 0 0 4px #fff}
+.tabbar a.tab-center .tl{font-size:10.5px;margin-top:2px;color:#64748B}
+.tabbar a.tab-center.active .tl{color:#028090}
+@media (max-width: 860px){
+  .tabbar{display:grid}
+  body{padding-bottom:78px}
+  .fab{bottom:86px !important}
+}
+@media print{ .tabbar{display:none !important} }

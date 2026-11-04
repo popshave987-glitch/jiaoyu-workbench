@@ -8,7 +8,7 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="./styles.css?v=48">
+<link rel="stylesheet" href="./styles.css?v=49">
 </head>
 <body>
 
@@ -30,6 +30,14 @@
 
 <main id="view"></main>
 
+<nav class="tabbar" id="tabbar">
+  <a href="#/students" data-tab="students"><span class="ti">👥</span><span class="tl">学生</span></a>
+  <a href="#/courses" data-tab="courses"><span class="ti">🎒</span><span class="tl">课程</span></a>
+  <a href="#/ai" data-tab="ai" class="tab-center"><span class="ti">🤖</span><span class="tl">AI</span></a>
+  <a href="#/exports" data-tab="exports"><span class="ti">📥</span><span class="tl">下载</span></a>
+  <a href="#/contacts" data-tab="contacts"><span class="ti">💬</span><span class="tl">沟通</span></a>
+</nav>
+
 <button class="fab" id="fab" aria-label="新增">+</button>
 
 <div class="modal-wrap" id="modalWrap">
@@ -37,7 +45,7 @@
 </div>
 
 <script src="./vendor/xlsx.full.min.js"></script>
-<script src="./config.js?v=48"></script>
-<script src="./app.js?v=48"></script>
+<script src="./config.js?v=49"></script>
+<script src="./app.js?v=49"></script>
 </body>
 </html>
