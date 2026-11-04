@@ -1440,7 +1440,8 @@ function aiSystemPrompt() {
     '可用动作：',
     '1) {"type":"none"} 只回答问题/分析数据。',
     '2) {"type":"create_course","args":{"name":"课程名","subject":"化学","date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","students":["姓名",...]}} 新建课程（系统会先请用户确认）。',
-    '3) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
+    '3) {"type":"create_student","args":{"name":"姓名","cls":"班级（如 高二1班）","grade":"年级（可选）","school":"学校（可选）","phone":"11位手机号（可选）","status":"在读/已结课（可选）","note":"备注（可选）"}} 新建学生（系统先请用户确认，并自动查重）。',
+    '4) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
     '导出列必须在白名单内：',
     JSON.stringify(AI_COLUMNS),
     '硬性规则（必须遵守）：',
@@ -1489,6 +1490,16 @@ function aiRenderMsgs() {
   return aiLog.map((m, i) => {
     if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(m.text)}</div>`;
     let extra = '';
+    if (m.action && m.action.type === 'create_student' && m.status === 'pending') {
+      const a = m.action.args || {};
+      return `<div class="ai-b ai-b-a">${esc(m.text).replace(/\n/g, '<br>')}
+      <div class="ai-confirm">
+        <div class="ai-confirm-t">将新建学生</div>
+        <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.cls || '未填班级')} · ${esc(a.grade || '')}<br>${esc(a.school || '')} ${esc(a.phone ? '· ' + a.phone : '')}</div>
+        <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认添加</button>
+        <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
+      </div></div>`;
+    }
     if (m.action && m.action.type === 'create_course' && m.status === 'pending') {
       const a = m.action.args || {};
       extra = `<div class="ai-confirm">
@@ -1592,6 +1603,15 @@ const AI_BLOCK_WORDS = ['删除', '删掉', '删了', '删', '移除', '清空',
 function aiBlockedWord(q) {
   const t = String(q || '').toLowerCase();
   return AI_BLOCK_WORDS.find(w => t.includes(String(w).toLowerCase())) || '';
+}
+function aiStudentConflict(a) {
+  const name = String(a.name || '').trim();
+  if (!name) return '学生姓名缺失，请手动添加';
+  const dup = S.students.find(st => st.name === name && (!a.cls || classOf(st) === a.cls));
+  if (dup) return `已存在同名学生（${dup.name} · ${classOf(dup)}），请手动添加或换一个区分方式`;
+  const phone = String(a.phone || '').trim();
+  if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `手机号格式不对（${phone}），请确认 11 位后手动添加`;
+  return '';
 }
 function aiCourseConflict(a) {
   const name = String(a.name || '').trim();
@@ -1711,7 +1731,7 @@ async function aiSend(text) {
   aiBusyUi(true);
   try {
     const r = await aiRun(q, aiAbort.signal, img);
-    const ALLOWED = ['none', 'create_course', 'export'];
+    const ALLOWED = ['none', 'create_course', 'create_student', 'export'];
     const type = (r.action && r.action.type) || 'none';
     if (!ALLOWED.includes(type)) {
       r.action = { type: 'none' };
@@ -2621,6 +2641,26 @@ function bind() {
       const m = aiLog[i];
       if (!m || !m.action) return;
       const a = m.action.args || {};
+      if (m.action.type === 'create_student') {
+        const c = aiStudentConflict(a);
+        if (c) {
+          m.status = 'done';
+          m.text += '\n⚠️ ' + c;
+          saveAiLog(); render();
+          return toast(c);
+        }
+        S.students.push({
+          id: uid(), created: today(), name: String(a.name).trim(), cls: a.cls || '未分班',
+          grade: a.grade || '', school: a.school || '', phone: a.phone || '',
+          status: a.status || '在读', note: a.note || '',
+        });
+        saveKey('students');
+        m.status = 'done';
+        m.text += `\n✅ 已添加学生：${a.name}（${a.cls || '未分班'}）`;
+        saveAiLog(); render();
+        toast('学生已添加');
+        return;
+      }
       const conflict = aiCourseConflict(a);
       if (conflict) {
         m.status = 'done';
