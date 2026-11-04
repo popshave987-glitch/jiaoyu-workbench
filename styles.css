@@ -420,3 +420,9 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 .course-card{cursor:pointer;transition:box-shadow .15s,border-color .15s}
 .course-card:hover{border-color:#A5F3FC;box-shadow:0 4px 14px rgba(2,128,144,.10)}
 .course-card:active{transform:scale(.995)}
+
+/* 长文本字段 */
+.field textarea{min-height:92px;max-height:260px;overflow-y:auto;resize:vertical;line-height:1.6}
+.aif textarea{width:100%;min-height:96px;max-height:260px;overflow-y:auto;resize:vertical}
+.aif-bar{display:flex;align-items:center;gap:6px;margin-top:4px}
+.aif-cnt{font-size:11px;color:#94A3B8}

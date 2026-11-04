@@ -199,6 +199,20 @@ function input(name, val, ph, type) {
 function textarea(name, val, ph) {
   return `<textarea name="${name}" placeholder="${esc(ph || '')}">${esc(val || '')}</textarea>`;
 }
+
+/* 长文本输入：多行、限长、AI 润色 / 还原原文 */
+function aiField(label, name, val, ph, max) {
+  const n = max || 600;
+  return `<div class="aif" data-aif="${name}">
+    <textarea name="${name}" maxlength="${n}" placeholder="${esc(ph || '')}" style="min-height:96px">${esc(val || '')}</textarea>
+    <div class="aif-bar">
+      <span class="aif-cnt">最多 ${n} 字</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn sm" data-act="ai-polish" data-name="${name}" data-label="${esc(label)}">AI 润色</button>
+      <button type="button" class="btn sm" data-act="ai-restore" data-name="${name}" disabled>还原</button>
+    </div>
+  </div>`;
+}
 function studentOptions(sel) {
   return S.students.map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)}${s.grade ? ' · ' + esc(s.grade) : ''}</option>`).join('');
 }
@@ -448,8 +462,8 @@ function formContact(c) {
       ${field('方式', `<select name="type">${['微信', '电话', '面谈', '家长会'].map(x => `<option ${c.type === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
       ${field('日期', input('date', c.date || today(), '', 'date'))}
     </div>
-    ${field('沟通内容', textarea('content', c.content, '家长反馈 / 沟通要点'))}` +
-    field('跟进事项', input('follow', c.follow, '下周重点辅导力学部分'));
+    ${field('沟通内容', aiField('沟通内容', 'content', c.content, '家长反馈 / 沟通要点 / 双方约定', 800))}` +
+    field('跟进事项', aiField('跟进事项', 'follow', c.follow, '下周重点辅导力学部分', 300));
 }
 
 /* ---------------- 测评 ---------------- */
@@ -814,13 +828,13 @@ function formFeedback(f) {
         <button type="button" class="rt-btn" data-act="rt-clear">清空</button>
       </div><div class="rt" id="notesEditor" contenteditable="true" data-ph="点 AI 生成考点，或手动写本节内容…"></div>
       <input type="hidden" name="notes" value="">`, '支持加粗、项目符号；手动改过也能按行删除考点') +
-    field('课堂表现', input('performance', f.performance, '专注 / 积极提问 / 后半段走神')) +
-    field('课后作业', textarea('homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式')) +
-    field('进步点', input('progress', f.progress || f.good, '方程式配平正确率明显提高')) +
-    field('需要加强点', input('weak', f.weak, '装置气密性检查的表述仍不完整')) +
-    field('默写检查情况', input('dictation', f.dictation, '化学式默写 8/10，错 H₂CO₃、Fe(OH)₃')) +
+    field('课堂表现', aiField('课堂表现', 'performance', f.performance, '专注听讲、主动提问、后半段注意力下降等', 600)) +
+    field('课后作业', aiField('课后作业', 'homework', f.homework || f.task, '练习册 P32 1-5；默写 3 个方程式', 600)) +
+    field('进步点', aiField('进步点', 'progress', f.progress || f.good, '如：方程式配平正确率明显提高，能独立分析步骤', 600)) +
+    field('需要加强点', aiField('需要加强点', 'weak', f.weak, '如：装置气密性检查的表述仍不完整', 600)) +
+    field('默写检查情况', aiField('默写检查情况', 'dictation', f.dictation, '化学式默写 8/10，错 H₂CO₃、Fe(OH)₃', 500)) +
     field('错题拍照', `<input type="file" name="photos" accept="image/*" multiple>
-      <div class="tip">可拍多张，自动压缩后存在本机；没有就留空。</div>
+      <div class="tip">可拍多张，原图保存在本机（单张建议 ≤10MB）；没有就留空。</div>
       <div class="photos" id="photoPrev"></div>`) +
     field('评价', `<select name="rating">${['优秀', '良好', '待加强'].map(x => `<option ${f.rating === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`);
 }
@@ -999,7 +1013,7 @@ function formPlan(p) {
       ${field('科目', combo('subject', p.subject, '化学', COMBO_SRC.subject()))}
       ${field('结束日期', input('end', p.end, '', 'date'))}
     </div>` +
-    field('阶段目标', input('goal', p.goal, '掌握几何证明…')) +
+    field('阶段目标', aiField('阶段目标', 'goal', p.goal, '掌握几何证明、稳定在 80 分以上…', 300)) +
     field('任务清单（每行一条）', `<textarea name="tasks">${esc(tasksText)}</textarea>`, '每天 2 道计算题\n每周一次错题回顾');
 }
 
@@ -2638,6 +2652,38 @@ function bind() {
     const id = t.dataset.id;
     const sid = t.dataset.sid;
 
+    if (act === 'ai-polish') {
+      const name = t.dataset.name;
+      const ta = document.getElementById('modal').querySelector(`textarea[name="${name}"]`);
+      if (!ta) return;
+      const cur = String(ta.value || '').trim();
+      if (!cur) return toast('先写一点内容，再点润色');
+      if (!ta.dataset.original) ta.dataset.original = ta.value;
+      const max = +ta.getAttribute('maxlength') || 600;
+      const label = t.dataset.label || '内容';
+      const old = t.textContent;
+      t.disabled = true; t.textContent = '润色中…';
+      try {
+        const { text } = await aiChat([
+          { role: 'system', content: '你是资深中学教师，擅长把课堂反馈写得具体、专业、鼓励式。只输出润色后的正文，不要解释、不要引号。' },
+          { role: 'user', content: `把下面「${label}」润色到 80–150 字，保持事实不变，语言自然，不用夸张词：\n${cur}` },
+        ], { maxTokens: 400 });
+        const out = String(text || '').trim().replace(/^["“']+|["”']+$/g, '');
+        if (!out) toast('没有返回内容');
+        else {
+          ta.value = out.slice(0, max);
+          const r = document.querySelector(`#modal [data-act="ai-restore"][data-name="${name}"]`);
+          if (r) r.disabled = false;
+        }
+      } catch (e) { toast('润色失败：' + String(e.message || e).slice(0, 30)); }
+      finally { t.disabled = false; t.textContent = old; }
+      return;
+    }
+    if (act === 'ai-restore') {
+      const ta = document.getElementById('modal').querySelector(`textarea[name="${t.dataset.name}"]`);
+      if (ta && ta.dataset.original != null) ta.value = ta.dataset.original;
+      return;
+    }
     if (act === 'modal-cancel') return closeModal();
     if (act === 'modal-ok') {
       const form = document.getElementById('modal').querySelector('form') || document.getElementById('modal');
