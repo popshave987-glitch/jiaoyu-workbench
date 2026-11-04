@@ -415,3 +415,8 @@ main { padding: 14px 12px 90px; max-width: 860px; margin: 0 auto; }
 }
 @media print{ .tabbar{display:none !important} }
 
+
+/* 课程卡片整卡可点 */
+.course-card{cursor:pointer;transition:box-shadow .15s,border-color .15s}
+.course-card:hover{border-color:#A5F3FC;box-shadow:0 4px 14px rgba(2,128,144,.10)}
+.course-card:active{transform:scale(.995)}

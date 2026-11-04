@@ -1042,7 +1042,7 @@ function viewCourses() {
     ${list.map(c => {
     const total = (c.sids || []).length;
     const done = (c.sids || []).filter(sid => courseFb(c.id, sid)).length;
-    return `<div class="card">
+    return `<div class="card course-card" data-act="open-course" data-id="${c.id}">
         <div class="row"><span class="course-emoji">🎒</span><strong>${esc(c.name)}</strong>
           <span class="tag">${esc(c.subject || '化学')}</span><span class="spacer"></span>
           <span class="meta">${esc(c.date || '')}</span></div>
