@@ -1724,7 +1724,7 @@ function aiRecoverStale() {
   });
 }
 function viewAi() {
-  if (!aiSessions.length) loadAiLog();
+  if (!aiSessions.length || !aiCur()) loadAiLog();
   aiRecoverStale();
   return `
     <div class="card ai-card">
@@ -1915,8 +1915,9 @@ async function aiPickFile(file) {
 }
 
 async function aiSend(text) {
+  if (!aiSessions.length || !aiCur()) loadAiLog();
   const sess = aiCur();
-  if (!sess) return;
+  if (!sess) return toast('会话异常，请重新打开 AI 助手');
   const sid = sess.id, log = sess.msgs;
   let q = String(text || '').trim();
   if (aiAttach && aiAttach.kind === 'text') {
@@ -2911,7 +2912,8 @@ function bind() {
         return;
       }
       const inp = document.getElementById('aiInput');
-      const val = inp ? inp.value : '';
+      const val = inp ? String(inp.value || '').trim() : '';
+      if (!val && !aiAttach) return toast('请先输入内容');
       aiSend(val);
       if (inp) inp.value = '';
       return;
