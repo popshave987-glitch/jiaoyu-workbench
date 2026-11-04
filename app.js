@@ -1493,9 +1493,17 @@ function aiScrollBottom() {
   if (c) c.scrollTop = c.scrollHeight;
 }
 
+function aiPrettyUser(t) {
+  let x = String(t || '');
+  const i = x.indexOf('】');
+  if (i > 0 && x.indexOf('【文件') >= 0) x = x.slice(0, i + 1) + '\n[文件内容已折叠]';
+  if (x.length > 240) x = x.slice(0, 240) + '\n…（已省略）';
+  return x;
+}
+
 function aiRenderMsgs() {
   return aiLog.map((m, i) => {
-    if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(m.text)}</div>`;
+    if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(aiPrettyUser(m.text)).replace(/\n/g, '<br>')}</div>`;
     let extra = '';
     if (m.action && m.action.type === 'create_student' && m.status === 'pending') {
       const a = m.action.args || {};
