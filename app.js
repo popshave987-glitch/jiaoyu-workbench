@@ -1440,7 +1440,7 @@ function aiSystemPrompt() {
     '可用动作：',
     '1) {"type":"none"} 只回答问题/分析数据。',
     '2) {"type":"create_course","args":{"name":"课程名","subject":"化学","date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","students":["姓名",...]}} 新建课程（系统会先请用户确认）。',
-    '3) {"type":"create_student","args":{"name":"姓名","cls":"班级（如 高二1班）","grade":"年级（可选）","school":"学校（可选）","phone":"11位手机号（可选）","status":"在读/已结课（可选）","note":"备注（可选）"}} 新建学生（系统先请用户确认，并自动查重）。',
+    '3) {"type":"create_student","args":{"name":"姓名","cls":"班级（如 高二1班）","grade":"年级（可选）","school":"学校（可选）","phone":"手机号（可选，不校验格式）","status":"在读/已结课（可选）","note":"备注（可选）"}} 新建学生（系统先请用户确认，并自动查重）。',
     '4) {"type":"export","args":{"name":"文件名(不含扩展名)","source":"students|courses|feedbacks","columns":["列名"...],"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}} 导出定制 CSV 到下载历史。',
     '导出列必须在白名单内：',
     JSON.stringify(AI_COLUMNS),
@@ -1609,8 +1609,6 @@ function aiStudentConflict(a) {
   if (!name) return '学生姓名缺失，请手动添加';
   const dup = S.students.find(st => st.name === name && (!a.cls || classOf(st) === a.cls));
   if (dup) return `已存在同名学生（${dup.name} · ${classOf(dup)}），请手动添加或换一个区分方式`;
-  const phone = String(a.phone || '').trim();
-  if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `手机号格式不对（${phone}），请确认 11 位后手动添加`;
   return '';
 }
 function aiCourseConflict(a) {
