@@ -284,7 +284,8 @@ function render() {
     plans: viewPlans, courses: viewCourses, ai: viewAi, stats: viewStats, exports: viewExports, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
-  document.getElementById('fab').style.display = (current === 'data' || current === 'home' || current === 'stats') ? 'none' : 'flex';
+  const fabPages = ['students', 'contacts', 'assessments', 'plans'];
+  document.getElementById('fab').style.display = fabPages.includes(current) ? 'flex' : 'none';
 }
 
 /* ---------------- 首页 ---------------- */
