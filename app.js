@@ -284,8 +284,8 @@ function render() {
     plans: viewPlans, courses: viewCourses, ai: viewAi, stats: viewStats, exports: viewExports, data: viewData,
   }[current] || viewHome)();
   document.getElementById('view').innerHTML = v;
-  const fabPages = ['students', 'contacts', 'assessments', 'plans'];
-  document.getElementById('fab').style.display = fabPages.includes(current) ? 'flex' : 'none';
+  const fabPages = ['students', 'courses', 'contacts', 'assessments', 'plans'];
+  document.getElementById('fab').style.display = fabPages.includes(current) ? 'block' : 'none';
 }
 
 /* ---------------- 首页 ---------------- */
@@ -2478,7 +2478,11 @@ function bind() {
   document.getElementById('scrim').onclick = closeDrawer;
   document.getElementById('exportBtn').onclick = () => { location.hash = '#/data'; };
   document.getElementById('fab').onclick = () => {
-    const map = { students: 'student', contacts: 'contact', assessments: 'assessment', feedbacks: 'feedback', plans: 'plan' };
+    if (current === 'courses') {
+      if (!S.students.length) return toast('请先添加学生');
+      return openModal('新建课程', formCourse(), '保存', f => saveCourse(formData(f)));
+    }
+    const map = { students: 'student', contacts: 'contact', assessments: 'assessment', plans: 'plan' };
     const fn = OPEN[map[current]];
     if (!fn) return;
     if (current !== 'students' && !S.students.length) return toast('请先添加学生');
