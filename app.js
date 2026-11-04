@@ -662,22 +662,30 @@ async function aiChat(messages, opt) {
         }
         const timer = setTimeout(() => ctrl.abort(), 25000);
         try {
+          const body = {
+            model,
+            temperature: opt.temperature != null ? opt.temperature : 0.2,
+            max_tokens: opt.maxTokens || 900,
+            messages,
+          };
+          // glm-4v-flash 等视觉模型不支持 thinking 参数，带上会返回 400
+          if (!opt.model) body.thinking = { type: 'disabled' };
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.keys[i] },
-            body: JSON.stringify({
-              model,
-              temperature: opt.temperature != null ? opt.temperature : 0.2,
-              max_tokens: opt.maxTokens || 900,
-              thinking: { type: 'disabled' },
-              messages,
-            }),
+            body: JSON.stringify(body),
             signal: ctrl.signal,
           });
           clearTimeout(timer);
           if (!res.ok) {
             if ((res.status === 429 || res.status >= 500) && attempt < 2) { await sleep(1200 * (attempt + 1)); continue; }
-            errs.push('Key' + (i + 1) + ':' + codeMsg(res.status)); break;
+            let detail = '';
+            try {
+              const eb = await res.json();
+              detail = (eb && eb.error && (eb.error.message || eb.error.code)) || '';
+            } catch (_) { }
+            errs.push('Key' + (i + 1) + ':' + codeMsg(res.status) + (detail ? ' ' + String(detail).slice(0, 40) : ''));
+            break;
           }
           const data = await res.json();
           const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
