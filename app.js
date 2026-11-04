@@ -1487,6 +1487,11 @@ async function aiRun(text, signal, imageDataUrl) {
   return aiParse(r.text);
 }
 
+function aiScrollBottom() {
+  const c = document.getElementById('aiChat');
+  if (c) c.scrollTop = c.scrollHeight;
+}
+
 function aiRenderMsgs() {
   return aiLog.map((m, i) => {
     if (m.role === 'u') return `<div class="ai-b ai-b-u">${esc(m.text)}</div>`;
@@ -1495,7 +1500,15 @@ function aiRenderMsgs() {
       const a = m.action.args || {};
       return `<div class="ai-b ai-b-a">${esc(m.text).replace(/\n/g, '<br>')}
       <div class="ai-confirm">
-        <div class="ai-confirm-t">将新建学生</div>
+        <div class="ai-confirm-t">将新建学生（可直接修改）</div>
+        <div class="ai-edit">
+          <label>姓名<input data-f="name" value="${esc(a.name || '')}"></label>
+          <label>班级<input data-f="cls" value="${esc(a.cls || '')}" placeholder="如 高二1班"></label>
+          <label>年级<input data-f="grade" value="${esc(a.grade || '')}"></label>
+          <label>学校<input data-f="school" value="${esc(a.school || '')}"></label>
+          <label>手机<input data-f="phone" value="${esc(a.phone || '')}"></label>
+          <label>备注<input data-f="note" value="${esc(a.note || '')}"></label>
+        </div>
         <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.cls || '未填班级')} · ${esc(a.grade || '')}<br>${esc(a.school || '')} ${esc(a.phone ? '· ' + a.phone : '')}</div>
         <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认添加</button>
         <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
@@ -1504,7 +1517,15 @@ function aiRenderMsgs() {
     if (m.action && m.action.type === 'create_course' && m.status === 'pending') {
       const a = m.action.args || {};
       extra = `<div class="ai-confirm">
-        <div class="ai-confirm-t">将新建课程</div>
+        <div class="ai-confirm-t">将新建课程（可直接修改）</div>
+        <div class="ai-edit">
+          <label>课程名<input data-f="name" value="${esc(a.name || '')}"></label>
+          <label>科目<input data-f="subject" value="${esc(a.subject || '化学')}"></label>
+          <label>日期<input data-f="date" type="date" value="${esc(a.date || '')}"></label>
+          <label>开始<input data-f="start" value="${esc(a.start || '')}" placeholder="HH:mm"></label>
+          <label>结束<input data-f="end" value="${esc(a.end || '')}" placeholder="HH:mm"></label>
+          <label class="wide">学生<input data-f="students" value="${esc((a.students || []).join('、'))}" placeholder="多人用、分隔"></label>
+        </div>
         <div class="ai-confirm-d">${esc(a.name || '')} · ${esc(a.subject || '化学')} · ${esc(a.date || '')} ${esc(a.start || '')}-${esc(a.end || '')}<br>学生：${esc((a.students || []).join('、') || '')}</div>
         <div class="btns"><button class="btn sm primary" data-act="ai-confirm" data-idx="${i}">确认创建</button>
         <button class="btn sm" data-act="ai-cancel" data-idx="${i}">取消</button></div>
@@ -1723,6 +1744,7 @@ async function aiSend(text) {
   }
   aiLog.push({ role: 'u', text: shown });
   saveAiLog(); render();
+  setTimeout(aiScrollBottom, 20);
   const box = document.getElementById('aiChat');
   if (box) box.innerHTML += '<div class="ai-b ai-b-a ai-thinking">思考中…</div>';
   aiBusy = true;
@@ -1752,6 +1774,7 @@ async function aiSend(text) {
   aiAttach = null;
   saveAiLog(); render();
   aiBusyUi(false);
+  setTimeout(aiScrollBottom, 30);
   setTimeout(() => { const c = document.getElementById('aiChat'); if (c) c.scrollTop = c.scrollHeight; }, 30);
 }
 
@@ -2642,7 +2665,16 @@ function bind() {
       const i = +t.dataset.idx;
       const m = aiLog[i];
       if (!m || !m.action) return;
-      const a = m.action.args || {};
+      const card = t.closest('.ai-confirm');
+      const a = Object.assign({}, m.action.args || {});
+      if (card) {
+        card.querySelectorAll('[data-f]').forEach(inp => {
+          const k = inp.getAttribute('data-f'), v = String(inp.value || '').trim();
+          if (k === 'students') a.students = v ? v.split(/[、,，]/).map(x => x.trim()).filter(Boolean) : [];
+          else a[k] = v;
+        });
+      }
+      m.action.args = a;
       if (m.action.type === 'create_student') {
         const c = aiStudentConflict(a);
         if (c) {
